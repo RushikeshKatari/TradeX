@@ -1,0 +1,283 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum FundTransactionType {
+  INITIAL_ALLOCATION
+  ADMIN_CREDIT
+  ADMIN_DEBIT
+  ORDER_HOLD
+  ORDER_RELEASE
+  TRADE_BUY
+  TRADE_SELL
+}
+
+enum OrderSide {
+  BUY
+  SELL
+}
+
+enum OrderType {
+  MARKET
+  LIMIT
+  STOP
+  STOP_LIMIT
+}
+
+enum OrderStatus {
+  PENDING
+  OPEN
+  PARTIALLY_FILLED
+  FILLED
+  CANCELLED
+  REJECTED
+}
+
+enum InstrumentType {
+  EQUITY
+  INDEX
+  OPTION
+}
+
+model User {
+  id            String             @id @default(uuid())
+  email         String             @unique
+  username      String             @unique
+  displayName   String
+  passwordHash  String
+  role          Role               @default(USER)
+  status        UserStatus         @default(ACTIVE)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  virtualAccount    VirtualAccount?
+  fundTransactions  FundTransaction[]
+  sessions          Session[]
+  watchlists        Watchlist[]
+  orders            Order[]
+  trades            Trade[]
+  positions         Position[]
+  holdings          Holding[]
+  snapshots         PortfolioSnapshot[]
+  auditLogs         AuditLog[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@map("sessions")
+}
+
+model VirtualAccount {
+  id              String            @id @default(uuid())
+  userId          String            @unique
+  currency        String            @default("INR")
+  balance         Decimal           @default(1000000.00) @db.Decimal(18, 2)
+  reservedBalance Decimal           @default(0.00) @db.Decimal(18, 2)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions    FundTransaction[]
+
+  @@map("virtual_accounts")
+}
+
+model FundTransaction {
+  id               String              @id @default(uuid())
+  virtualAccountId String
+  userId           String
+  type             FundTransactionType
+  amount           Decimal             @db.Decimal(18, 2)
+  balanceBefore    Decimal             @db.Decimal(18, 2)
+  balanceAfter     Decimal             @db.Decimal(18, 2)
+  reason           String
+  createdBy        String
+  createdAt        DateTime            @default(now())
+
+  virtualAccount   VirtualAccount      @relation(fields: [virtualAccountId], references: [id], onDelete: Cascade)
+  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("fund_transactions")
+}
+
+model Instrument {
+  id             String         @id @default(uuid())
+  symbol         String         @unique
+  name           String
+  exchange       String         @default("NSE")
+  instrumentType InstrumentType @default(EQUITY)
+  lotSize        Int            @default(1)
+  tickSize       Decimal        @default(0.05) @db.Decimal(8, 2)
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([symbol])
+  @@index([instrumentType])
+  @@map("instruments")
+}
+
+model Watchlist {
+  id        String          @id @default(uuid())
+  userId    String
+  name      String          @default("My Watchlist")
+  createdAt DateTime        @default(now())
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     WatchlistItem[]
+
+  @@index([userId])
+  @@map("watchlists")
+}
+
+model WatchlistItem {
+  id          String    @id @default(uuid())
+  watchlistId String
+  symbol      String
+  sortOrder   Int       @default(0)
+  addedAt     DateTime  @default(now())
+
+  watchlist   Watchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+
+  @@unique([watchlistId, symbol])
+  @@map("watchlist_items")
+}
+
+model Order {
+  id              String         @id @default(uuid())
+  userId          String
+  symbol          String
+  exchange        String         @default("NSE")
+  instrumentType  InstrumentType @default(EQUITY)
+  side            OrderSide
+  orderType       OrderType      @default(MARKET)
+  quantity        Int
+  requestedPrice  Decimal?       @db.Decimal(18, 2)
+  executedPrice   Decimal?       @db.Decimal(18, 2)
+  status          OrderStatus    @default(PENDING)
+  rejectionReason String?
+  createdAt       DateTime       @default(now())
+  executedAt      DateTime?
+
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trades          Trade[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model Trade {
+  id         String    @id @default(uuid())
+  orderId    String
+  userId     String
+  symbol     String
+  side       OrderSide
+  quantity   Int
+  price      Decimal   @db.Decimal(18, 2)
+  value      Decimal   @db.Decimal(18, 2)
+  executedAt DateTime  @default(now())
+
+  order      Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([symbol])
+  @@index([executedAt])
+  @@map("trades")
+}
+
+model Position {
+  id                String   @id @default(uuid())
+  userId            String
+  symbol            String
+  exchange          String   @default("NSE")
+  quantity          Int
+  averageEntryPrice Decimal  @db.Decimal(18, 2)
+  realizedPnL       Decimal  @default(0.00) @db.Decimal(18, 2)
+  updatedAt         DateTime @updatedAt
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, symbol])
+  @@index([userId])
+  @@map("positions")
+}
+
+model Holding {
+  id           String   @id @default(uuid())
+  userId       String
+  symbol       String
+  quantity     Int
+  averagePrice Decimal  @db.Decimal(18, 2)
+  updatedAt    DateTime @updatedAt
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, symbol])
+  @@index([userId])
+  @@map("holdings")
+}
+
+model PortfolioSnapshot {
+  id            String   @id @default(uuid())
+  userId        String
+  totalInvested Decimal  @db.Decimal(18, 2)
+  currentValue  Decimal  @db.Decimal(18, 2)
+  cashBalance   Decimal  @db.Decimal(18, 2)
+  realizedPnL   Decimal  @db.Decimal(18, 2)
+  unrealizedPnL Decimal  @db.Decimal(18, 2)
+  recordedAt    DateTime @default(now())
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([recordedAt])
+  @@map("portfolio_snapshots")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  details   Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
