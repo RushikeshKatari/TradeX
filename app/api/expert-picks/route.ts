@@ -47,14 +47,13 @@ export async function GET(request: NextRequest) {
 
     // 6. Fetch User's Open Option Positions
     const allDbPositions = await prisma.position.findMany({
-      where: { userId: user.userId },
+      where: { userId: user.userId, quantity: { gt: 0 } },
       orderBy: { updatedAt: 'desc' },
     });
 
     const positions: ExpertPickPosition[] = [];
 
     for (const p of allDbPositions) {
-      if (p.quantity <= 0) continue;
       const match = p.symbol.match(/^([A-Z0-9]+)_(\d+(?:\.\d+)?)_(CE|PE)$/);
       if (!match) continue;
 
