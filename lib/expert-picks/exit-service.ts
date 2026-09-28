@@ -146,18 +146,20 @@ export async function evaluateAndExecuteAutoExits(
   }
 
   // 3. Combined-Profit Exit Check
-  // Group by underlying
-  const groupedByUnderlying = new Map<string, { ce: ExpertPickPosition[]; pe: ExpertPickPosition[] }>();
+  // Each CE/PE entry creates a tradeGroupId. Evaluate targets per group so
+  // opening a second pair cannot cause the first pair to be closed.
+  const groupedTrades = new Map<string, { underlying: string; ce: ExpertPickPosition[]; pe: ExpertPickPosition[] }>();
   for (const pos of remainingPositions) {
-    if (!groupedByUnderlying.has(pos.underlying)) {
-      groupedByUnderlying.set(pos.underlying, { ce: [], pe: [] });
+    const groupKey = pos.tradeGroupId || `${pos.underlying}_${pos.strike}`;
+    if (!groupedTrades.has(groupKey)) {
+      groupedTrades.set(groupKey, { underlying: pos.underlying, ce: [], pe: [] });
     }
-    const group = groupedByUnderlying.get(pos.underlying)!;
+    const group = groupedTrades.get(groupKey)!;
     if (pos.optionType === 'CE') group.ce.push(pos);
     else group.pe.push(pos);
   }
 
-  for (const [underlying, group] of groupedByUnderlying.entries()) {
+  for (const [, group] of groupedTrades.entries()) {
     if (group.ce.length > 0 && group.pe.length > 0) {
       const ceInv = group.ce.reduce((sum, p) => sum + p.investment, 0);
       const peInv = group.pe.reduce((sum, p) => sum + p.investment, 0);
