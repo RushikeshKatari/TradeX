@@ -32,6 +32,12 @@ export function shouldStopLossExit(entryPrice: number, currentLtp: number, side:
   return currentLtp >= entryPrice * 1.5;
 }
 
+export function shouldConfiguredStopLossExit(entryPrice: number, currentLtp: number, stopLossPercent?: number, customDate?: Date): boolean {
+  if (!stopLossPercent || stopLossPercent <= 0) return shouldStopLossExit(entryPrice, currentLtp, 'BUY', customDate);
+  if (!isWithinTradingWindowIst(customDate) || entryPrice <= 0 || currentLtp <= 0) return false;
+  return currentLtp <= entryPrice * (1 - stopLossPercent / 100);
+}
+
 export function shouldCombinedProfitExit(
   ceInvestment: number,
   peInvestment: number,
@@ -109,7 +115,7 @@ export async function evaluateAndExecuteAutoExits(
   const remainingPositions: ExpertPickPosition[] = [];
   for (const pos of openPositions) {
     if (pos.status === 'CLOSED') continue;
-    if (shouldStopLossExit(pos.entryPrice, pos.currentLtp, pos.side)) {
+    if (shouldConfiguredStopLossExit(pos.entryPrice, pos.currentLtp, pos.stopLossPercent)) {
       try {
         const symbol = `${pos.underlying}_${pos.strike}_${pos.optionType}`;
         const orderInput: OrderInput = {
@@ -158,7 +164,9 @@ export async function evaluateAndExecuteAutoExits(
       const ceVal = group.ce.reduce((sum, p) => sum + p.currentValue, 0);
       const peVal = group.pe.reduce((sum, p) => sum + p.currentValue, 0);
 
-      if (shouldCombinedProfitExit(ceInv, peInv, ceVal, peVal)) {
+      const target = [...group.ce, ...group.pe].map((p) => p.exitTargetValue || 0).find((v) => v > 0) || 0;
+      const combinedCurrentValue = ceVal + peVal;
+      if (target > 0 ? combinedCurrentValue >= target : shouldCombinedProfitExit(ceInv, peInv, ceVal, peVal)) {
         const allInGroup = [...group.ce, ...group.pe];
         for (const pos of allInGroup) {
           try {

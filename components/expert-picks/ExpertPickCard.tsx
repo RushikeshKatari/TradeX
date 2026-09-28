@@ -19,11 +19,17 @@ interface Props {
   isEntering: boolean;
   availableCash: number;
   onSelect?: (pick: ExpertPickCandidate) => void;
+  pairedPick?: ExpertPickCandidate;
 }
 
-export function ExpertPickCard({ pick, onEnter, isEntering, availableCash, onSelect }: Props) {
+export function ExpertPickCard({ pick, onEnter, isEntering, availableCash, onSelect, pairedPick }: Props) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [allocatedCapital, setAllocatedCapital] = useState(pick.requiredInvestment);
+  const [ceInvestment, setCeInvestment] = useState(100000);
+  const [peInvestment, setPeInvestment] = useState(100000);
+  const [ceStopLossPercent, setCeStopLossPercent] = useState(50);
+  const [peStopLossPercent, setPeStopLossPercent] = useState(50);
+  const [targetValue, setTargetValue] = useState(210000);
 
   const isNoTrade = pick.action === 'NO_TRADE';
   const calculation = useMemo(() => {
@@ -38,6 +44,10 @@ export function ExpertPickCard({ pick, onEnter, isEntering, availableCash, onSel
   }, [allocatedCapital, availableCash, pick.lotSize, pick.ltp]);
 
   const insufficientCash = calculation.lots === 0;
+  const cePick = pick.optionType === 'CE' ? pick : pairedPick;
+  const pePick = pick.optionType === 'PE' ? pick : pairedPick;
+  const ceLots = cePick ? Math.floor(Math.min(100000, availableCash) / (cePick.ltp * cePick.lotSize)) : 0;
+  const peLots = pePick ? Math.floor(Math.min(100000, availableCash) / (pePick.ltp * pePick.lotSize)) : 0;
   const afterExitTime = isAfterExpertPicksExitTime();
   const disabled = isNoTrade || insufficientCash || isEntering || afterExitTime;
 
@@ -55,6 +65,11 @@ export function ExpertPickCard({ pick, onEnter, isEntering, availableCash, onSel
       ...pick,
       recommendedLots: calculation.lots,
       requiredInvestment: calculation.investment,
+      ceInvestment,
+      peInvestment,
+      ceStopLossPercent,
+      peStopLossPercent,
+      targetValue,
     });
   };
 
@@ -68,7 +83,7 @@ export function ExpertPickCard({ pick, onEnter, isEntering, availableCash, onSel
         
         <div className="mt-2 mb-4">
           <h3 className="text-lg font-bold text-white uppercase tracking-wider">
-            {pick.underlying} {pick.strike} {pick.optionType}
+            {pick.underlying} {pick.strike} {pick.pairedOptionTypes?.length === 2 ? 'CE + PE' : pick.optionType}
           </h3>
           <p className="text-xs text-slate-400 mt-1">Expiry: {pick.expiry}</p>
         </div>
@@ -145,27 +160,42 @@ export function ExpertPickCard({ pick, onEnter, isEntering, availableCash, onSel
             <div className="space-y-3 mb-6">
               <p className="text-slate-300">Review the selected option contract before opening a paper position.</p>
               <div className="bg-slate-900 p-3 rounded-lg border border-slate-800">
-                <div className="font-bold text-white text-lg">{pick.underlying} {pick.strike} {pick.optionType}</div>
+          <div className="font-bold text-white text-lg">{pick.underlying} {pick.strike} {pick.pairedOptionTypes?.length === 2 ? 'CE + PE' : pick.optionType}</div>
                 <div className="text-xs text-slate-400 mt-1">Expiry: {pick.expiry}</div>
                 <label className="block mt-3 text-xs text-slate-400">
-                  Investment allocation for this {pick.optionType} side
+                  CE investment
                   <input
                     type="number"
                     min="0"
                     max={availableCash}
-                    value={allocatedCapital}
-                    onChange={(event) => setAllocatedCapital(Math.min(Math.max(0, Number(event.target.value) || 0), availableCash))}
+                    value={ceInvestment}
+                    onChange={(event) => setCeInvestment(Math.max(0, Number(event.target.value) || 0))}
                     className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-sm text-white outline-none focus:border-indigo-500"
                   />
                 </label>
-                <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
-                  <div className="text-slate-400">Current LTP: <span className="text-white font-mono">{formatINR(pick.ltp)}</span></div>
-                  <div className="text-slate-400">Lot size: <span className="text-white font-mono">{pick.lotSize}</span></div>
-                  <div className="text-slate-400">Available cash: <span className="text-white font-mono">{formatINR(availableCash)}</span></div>
-                  <div className="text-slate-400">Lots: <span className="text-white font-mono">{calculation.lots}</span></div>
-                  <div className="text-slate-400">Qty: <span className="text-white font-mono">{calculation.quantity}</span></div>
-                  <div className="text-slate-400">LTP: <span className="text-white font-mono">{formatINR(pick.ltp)}</span></div>
-                  <div className="text-slate-400">Investment: <span className="text-white font-mono">{formatINR(calculation.investment)}</span></div>
+                <label className="block mt-3 text-xs text-slate-400">PE investment
+                  <input type="number" min="0" value={peInvestment} onChange={(e) => setPeInvestment(Math.max(0, Number(e.target.value) || 0))} className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-sm text-white" />
+                </label>
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <label className="text-xs text-slate-400">CE stop-loss %<input type="number" min="0" max="100" value={ceStopLossPercent} onChange={(e) => setCeStopLossPercent(Number(e.target.value) || 0)} className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-white" /></label>
+                  <label className="text-xs text-slate-400">PE stop-loss %<input type="number" min="0" max="100" value={peStopLossPercent} onChange={(e) => setPeStopLossPercent(Number(e.target.value) || 0)} className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-white" /></label>
+                </div>
+                <label className="block mt-3 text-xs text-slate-400">Combined exit value (X)
+                  <input type="number" min="1" value={targetValue} onChange={(e) => setTargetValue(Math.max(0, Number(e.target.value) || 0))} className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-sm text-white" />
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2 text-sm">
+                  {[{ label: 'CE', option: cePick, lots: ceLots }, { label: 'PE', option: pePick, lots: peLots }].map((side) => (
+                    <div key={side.label} className="rounded border border-slate-800 bg-slate-950/60 p-3">
+                      <div className={side.label === 'CE' ? 'text-cyan-400 font-bold' : 'text-purple-400 font-bold'}>{side.label} side</div>
+                      {side.option ? <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
+                        <div className="text-slate-400">LTP<br /><span className="text-white font-mono">{formatINR(side.option.ltp)}</span></div>
+                        <div className="text-slate-400">Lot size<br /><span className="text-white font-mono">{side.option.lotSize}</span></div>
+                        <div className="text-slate-400">Lots<br /><span className="text-white font-mono">{side.lots}</span></div>
+                        <div className="text-slate-400">Quantity<br /><span className="text-white font-mono">{side.lots * side.option.lotSize}</span></div>
+                        <div className="text-slate-400 col-span-2">Investment<br /><span className="text-white font-mono">{formatINR(side.lots * side.option.ltp * side.option.lotSize)}</span></div>
+                      </div> : <span className="text-xs text-slate-500">Side unavailable</span>}
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -181,7 +211,7 @@ export function ExpertPickCard({ pick, onEnter, isEntering, availableCash, onSel
                 onClick={confirmEnter}
                 className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition-colors shadow-lg"
               >
-                ENTER PAPER TRADE
+                {pick.pairedOptionTypes?.length === 2 ? 'ENTER CE + PE TRADE' : 'ENTER PAPER TRADE'}
               </button>
             </div>
           </div>

@@ -23,16 +23,20 @@ export function ExpertPickGrid({ picks, onEnter, enteringPickId, availableCash, 
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-      {picks.map((pick, i) => {
+      {Array.from(new Map(picks.map((pick) => [`${pick.underlying}_${pick.strike}`, pick])).values()).map((pick, i) => {
+        const pairTypes = picks.filter((candidate) => candidate.underlying === pick.underlying && candidate.strike === pick.strike).map((candidate) => candidate.optionType);
+        const pairedPick = { ...pick, pairedOptionTypes: pairTypes };
+        const otherLeg = picks.find((candidate) => candidate.underlying === pick.underlying && candidate.strike === pick.strike && candidate.optionType !== pick.optionType);
         const id = `${pick.underlying}_${pick.strike}_${pick.optionType}`;
         return (
           <ExpertPickCard 
             key={id + i} 
-            pick={pick} 
+            pick={pairedPick} 
             onEnter={onEnter}
             onSelect={onSelect}
             isEntering={enteringPickId === id}
             availableCash={availableCash}
+            pairedPick={otherLeg}
           />
         );
       })}

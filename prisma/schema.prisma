@@ -223,12 +223,16 @@ model Position {
   quantity          Int
   averageEntryPrice Decimal  @db.Decimal(18, 2)
   realizedPnL       Decimal  @default(0.00) @db.Decimal(18, 2)
+  stopLossPercent   Decimal? @db.Decimal(8, 2)
+  exitTargetValue   Decimal? @db.Decimal(18, 2)
+  tradeGroupId      String?
   updatedAt         DateTime @updatedAt
 
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, symbol])
   @@index([userId])
+  @@index([tradeGroupId])
   @@map("positions")
 }
 

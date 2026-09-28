@@ -64,10 +64,19 @@ export async function GET(request: NextRequest) {
 
       // Query live quote for mark-to-market P&L
       let currentLtp = Number(p.averageEntryPrice);
+      const chainRow = chain.strikes.find((row) => row.strikePrice === strike);
+      const chainLeg = optionType === 'CE' ? chainRow?.ce : chainRow?.pe;
+      if (chainLeg?.ltp && chainLeg.ltp > 0) {
+        currentLtp = Number(chainLeg.ltp);
+      }
       try {
-        const quote = await provider.getQuote(p.symbol);
-        if (quote && quote.lastPrice > 0) {
-          currentLtp = quote.lastPrice;
+        // Prefer the option-chain mark above; use the synthetic contract quote
+        // only when this position is not present in the selected chain.
+        if (!chainLeg?.ltp || chainLeg.ltp <= 0) {
+          const quote = await provider.getQuote(p.symbol);
+          if (quote && quote.lastPrice > 0) {
+            currentLtp = quote.lastPrice;
+          }
         }
       } catch {
         // Fall back to averageEntryPrice if quote fails
@@ -98,6 +107,9 @@ export async function GET(request: NextRequest) {
         pnl,
         pnlPercent,
         status: 'OPEN',
+        stopLossPercent: p.stopLossPercent ? Number(p.stopLossPercent) : undefined,
+        exitTargetValue: p.exitTargetValue ? Number(p.exitTargetValue) : undefined,
+        tradeGroupId: p.tradeGroupId || undefined,
         enteredAt: p.updatedAt.toISOString(),
       });
     }

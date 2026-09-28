@@ -9,6 +9,7 @@ import { ExpertPicksResponse, ExpertPickCandidate, ExpertPickPosition } from '@/
 import { formatINR, cn } from '@/lib/utils';
 
 export default function ExpertPicksPage() {
+  const investmentLimitPerSide = 100000;
   const [userRole, setUserRole] = useState<'USER' | 'ADMIN' | null>(null);
   const [data, setData] = useState<ExpertPicksResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -19,7 +20,6 @@ export default function ExpertPicksPage() {
   const [exitingId, setExitingId] = useState<string | null>(null);
   
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
-  const [selectedPick, setSelectedPick] = useState<ExpertPickCandidate | null>(null);
   const latestRequestRef = useRef(0);
 
   useEffect(() => {
@@ -71,7 +71,12 @@ export default function ExpertPicksPage() {
           expiry: pick.expiry,
           side: pick.action,
           quantity: pick.recommendedLots * pick.lotSize,
-          price: pick.ltp
+          price: pick.ltp,
+          ceInvestment: pick.ceInvestment,
+          peInvestment: pick.peInvestment,
+          ceStopLossPercent: pick.ceStopLossPercent,
+          peStopLossPercent: pick.peStopLossPercent,
+          targetValue: pick.targetValue,
         })
       });
       const result = await res.json();
@@ -188,134 +193,39 @@ export default function ExpertPicksPage() {
               </div>
 
               {/* Expert Picks */}
-              <section>
-                <h2 className="text-sm font-bold text-white uppercase tracking-wider mb-4 border-b border-border pb-2">Top Trade Ideas</h2>
-                <ExpertPickGrid 
-                  picks={data.picks} 
-                  onEnter={handleEnterTrade} 
-                  onSelect={setSelectedPick}
-                  enteringPickId={enteringId}
-                  availableCash={data.summary.availableCash}
-                />
-              </section>
-
               <section className="bg-[#0f172a] border border-border rounded-xl p-5">
-                <h2 className="text-sm font-bold text-white uppercase tracking-wider mb-4">CE / PE Position Sizing by Strike</h2>
+                <h2 className="text-sm font-bold text-white uppercase tracking-wider mb-1">CE / PE Position Sizing by Strike</h2>
+                <p className="text-xs text-slate-500 mb-4">Investment limit: ₹1,00,000 per CE side and ₹1,00,000 per PE side.</p>
                 <div className="space-y-3">
                   {Array.from(new Set(data.picks.map((pick) => pick.strike))).map((strike) => {
                     const ce = data.picks.find((pick) => pick.strike === strike && pick.optionType === 'CE');
                     const pe = data.picks.find((pick) => pick.strike === strike && pick.optionType === 'PE');
-                    const sizing = (pick: ExpertPickCandidate | undefined) => {
-                      if (!pick) return null;
-                      const cost = pick.ltp * pick.lotSize;
-                      const lots = cost > 0 ? Math.floor(data.summary.availableCash / cost) : 0;
-                      return { cost, lots, investment: lots * cost };
-                    };
-                    const ceSizing = sizing(ce);
-                    const peSizing = sizing(pe);
-                    return (
-                      <div key={`side-by-side-${strike}`} className="grid grid-cols-1 md:grid-cols-3 gap-3 rounded-lg border border-border bg-slate-900/50 p-3">
-                        <div className="flex items-center"><span className="text-slate-500 text-xs uppercase">Strike</span><span className="ml-3 font-mono font-bold text-white">{strike}</span></div>
-                        {[{ label: 'CE', pick: ce, result: ceSizing, color: 'text-cyan-400' }, { label: 'PE', pick: pe, result: peSizing, color: 'text-purple-400' }].map((side) => (
-                          <div key={side.label} className="rounded border border-border p-3">
-                            <div className={`font-bold ${side.color}`}>{side.label}</div>
-                            {side.pick && side.result ? (
-                              <div className="mt-2 grid grid-cols-2 gap-2 text-xs font-mono text-slate-300">
-                                <span>LTP<br /><b className="text-white">{formatINR(side.pick.ltp)}</b></span>
-                                <span>Lot Size<br /><b className="text-white">{side.pick.lotSize}</b></span>
-                                <span>Cost / Lot<br /><b className="text-white">{formatINR(side.result.cost)}</b></span>
-                                <span>Lots<br /><b className="text-white">{side.result.lots}</b></span>
-                                <span className="col-span-2">Investment<br /><b className="text-white">{formatINR(side.result.investment)}</b></span>
-                              </div>
-                            ) : <span className="text-xs text-slate-500">Not in Top 5</span>}
-                          </div>
-                        ))}
-                      </div>
-                    );
+                    return <div key={strike} className="grid grid-cols-1 md:grid-cols-3 gap-3 rounded-lg border border-border bg-slate-900/50 p-3">
+                      <div className="flex items-center"><span className="text-slate-500 text-xs uppercase">Strike</span><span className="ml-3 font-mono font-bold text-white">{strike}</span></div>
+                      {[{ label: 'CE', pick: ce, color: 'text-cyan-400' }, { label: 'PE', pick: pe, color: 'text-purple-400' }].map((side) => {
+                        const cost = side.pick ? side.pick.ltp * side.pick.lotSize : 0;
+                        const lots = cost ? Math.floor(Math.min(investmentLimitPerSide, data.summary.availableCash) / cost) : 0;
+                        return <div key={side.label} className="rounded border border-border p-3"><div className={`font-bold ${side.color}`}>{side.label}</div>{side.pick ? <div className="mt-2 grid grid-cols-2 gap-2 text-xs font-mono text-slate-300"><span>LTP<br /><b className="text-white">{formatINR(side.pick.ltp)}</b></span><span>Lot Size<br /><b className="text-white">{side.pick.lotSize}</b></span><span>Lots<br /><b className="text-white">{lots}</b></span><span>Investment<br /><b className="text-white">{formatINR(lots * cost)}</b></span></div> : <span className="text-xs text-slate-500">Not in Top 5</span>}</div>;
+                      })}
+                    </div>;
                   })}
                 </div>
               </section>
 
               <section className="bg-[#0f172a] border border-border rounded-xl p-5">
                 <h2 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Lot Calculation — All Recommended Calls &amp; Puts</h2>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead className="border-b border-border text-xs uppercase tracking-wider text-slate-500">
-                      <tr>
-                        <th className="px-3 py-3">Rank</th>
-                        <th className="px-3 py-3">Strike</th>
-                        <th className="px-3 py-3">Type</th>
-                        <th className="px-3 py-3 text-right">LTP</th>
-                        <th className="px-3 py-3 text-right">Lot Size</th>
-                        <th className="px-3 py-3 text-right">Cost / Lot</th>
-                        <th className="px-3 py-3 text-right">Affordable Lots</th>
-                        <th className="px-3 py-3 text-right">Investment</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/60">
-                      {data.picks.map((pick) => {
-                        const costPerLot = pick.ltp * pick.lotSize;
-                        const lots = costPerLot > 0 ? Math.floor(data.summary.availableCash / costPerLot) : 0;
-                        const investment = Number((lots * costPerLot).toFixed(2));
-                        return (
-                          <tr key={`sizing-${pick.rank}-${pick.strike}-${pick.optionType}`} className="text-slate-300">
-                            <td className="px-3 py-3 font-mono">#{pick.rank}</td>
-                            <td className="px-3 py-3 font-mono text-white">{pick.strike}</td>
-                            <td className={cn('px-3 py-3 font-bold', pick.optionType === 'CE' ? 'text-cyan-400' : 'text-purple-400')}>{pick.optionType}</td>
-                            <td className="px-3 py-3 text-right font-mono">{formatINR(pick.ltp)}</td>
-                            <td className="px-3 py-3 text-right font-mono">{pick.lotSize}</td>
-                            <td className="px-3 py-3 text-right font-mono">{formatINR(costPerLot)}</td>
-                            <td className="px-3 py-3 text-right font-mono text-white">{lots}</td>
-                            <td className="px-3 py-3 text-right font-mono text-white">{formatINR(investment)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                <p className="mt-3 text-xs text-slate-500">Formula for every CE and PE: cost per lot = LTP × lot size; lots = floor(available cash ÷ cost per lot).</p>
+                <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border text-xs uppercase tracking-wider text-slate-500"><tr><th className="px-3 py-3">Rank</th><th className="px-3 py-3">Strike</th><th className="px-3 py-3">Type</th><th className="px-3 py-3 text-right">LTP</th><th className="px-3 py-3 text-right">Lot Size</th><th className="px-3 py-3 text-right">Affordable Lots</th><th className="px-3 py-3 text-right">Investment</th></tr></thead><tbody className="divide-y divide-border/60">{data.picks.map((pick) => { const cost = pick.ltp * pick.lotSize; const lots = cost ? Math.floor(Math.min(investmentLimitPerSide, data.summary.availableCash) / cost) : 0; return <tr key={`sizing-${pick.rank}-${pick.strike}-${pick.optionType}`} className="text-slate-300"><td className="px-3 py-3 font-mono">#{pick.rank}</td><td className="px-3 py-3 font-mono text-white">{pick.strike}</td><td className={cn('px-3 py-3 font-bold', pick.optionType === 'CE' ? 'text-cyan-400' : 'text-purple-400')}>{pick.optionType}</td><td className="px-3 py-3 text-right font-mono">{formatINR(pick.ltp)}</td><td className="px-3 py-3 text-right font-mono">{pick.lotSize}</td><td className="px-3 py-3 text-right font-mono text-white">{lots}</td><td className="px-3 py-3 text-right font-mono text-white">{formatINR(lots * cost)}</td></tr>; })}</tbody></table></div>
               </section>
 
-              {selectedPick && (() => {
-                const costPerLot = selectedPick.ltp * selectedPick.lotSize;
-                const lots = costPerLot > 0 ? Math.floor(data.summary.availableCash / costPerLot) : 0;
-                const investment = Number((lots * costPerLot).toFixed(2));
-                return (
-                  <>
-                    <section className="bg-[#0f172a] border border-border rounded-xl p-5">
-                      <h2 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Buy / Sell Selection</h2>
-                      <div className="grid grid-cols-2 md:grid-cols-7 gap-4 text-sm">
-                        <div><span className="text-slate-500 block text-xs">Underlying</span><span className="text-white font-bold">{selectedPick.underlying}</span></div>
-                        <div><span className="text-slate-500 block text-xs">Strike</span><span className="text-white font-mono">{selectedPick.strike}</span></div>
-                        <div><span className="text-slate-500 block text-xs">Type</span><span className="text-cyan-400 font-bold">{selectedPick.optionType}</span></div>
-                        <div><span className="text-slate-500 block text-xs">LTP</span><span className="text-white font-mono">{formatINR(selectedPick.ltp)}</span></div>
-                        <div><span className="text-slate-500 block text-xs">Volume</span><span className="text-white font-mono">{selectedPick.volume.toLocaleString()}</span></div>
-                        <div><span className="text-slate-500 block text-xs">OI</span><span className="text-white font-mono">{selectedPick.oi.toLocaleString()}</span></div>
-                        <div><span className="text-slate-500 block text-xs">Action</span><span className={selectedPick.action === 'BUY' ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>{selectedPick.action}</span></div>
-                      </div>
-                    </section>
-                    <section className="bg-[#0f172a] border border-border rounded-xl p-5">
-                      <h2 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Lot Calculation / Position Sizing</h2>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-mono">
-                        <div><span className="text-slate-500 block text-xs font-sans">Available capital</span>{formatINR(data.summary.availableCash)}</div>
-                        <div><span className="text-slate-500 block text-xs font-sans">Cost per lot</span>{formatINR(costPerLot)} <span className="text-slate-500 text-xs font-sans">({formatINR(selectedPick.ltp)} × {selectedPick.lotSize})</span></div>
-                        <div><span className="text-slate-500 block text-xs font-sans">Lots</span>floor({formatINR(data.summary.availableCash)} ÷ {formatINR(costPerLot)}) = <b className="text-white">{lots}</b></div>
-                        <div><span className="text-slate-500 block text-xs font-sans">Investment</span>{lots} × {formatINR(costPerLot)} = <b className="text-white">{formatINR(investment)}</b></div>
-                      </div>
-                    </section>
-                    <section className="bg-[#0f172a] border border-border rounded-xl p-5">
-                      <h2 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Investment / Position</h2>
-                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm font-mono">
-                        <div><span className="text-slate-500 block text-xs font-sans">CE Investment</span>{selectedPick.optionType === 'CE' ? formatINR(investment) : '—'}</div>
-                        <div><span className="text-slate-500 block text-xs font-sans">PE Investment</span>{selectedPick.optionType === 'PE' ? formatINR(investment) : '—'}</div>
-                        <div><span className="text-slate-500 block text-xs font-sans">Total Investment</span>{formatINR(investment)}</div>
-                        <div><span className="text-slate-500 block text-xs font-sans">Available Capital</span>{formatINR(data.summary.availableCash)}</div>
-                        <div><span className="text-slate-500 block text-xs font-sans">Remaining Capital</span>{formatINR(data.summary.availableCash - investment)}</div>
-                      </div>
-                    </section>
-                  </>
-                );
-              })()}
+              <section>
+                <h2 className="text-sm font-bold text-white uppercase tracking-wider mb-4 border-b border-border pb-2">Top Trade Ideas</h2>
+                <ExpertPickGrid 
+                  picks={data.picks} 
+                  onEnter={handleEnterTrade} 
+                  enteringPickId={enteringId}
+                  availableCash={data.summary.availableCash}
+                />
+              </section>
 
               <section>
                 <h2 className="text-sm font-bold text-white uppercase tracking-wider mb-4 border-b border-border pb-2">Live P&amp;L</h2>
