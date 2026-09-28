@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Navbar } from '@/components/layout/navbar';
 import { Sidebar } from '@/components/layout/sidebar';
 import { PortfolioView } from '@/components/portfolio/portfolio-view';
@@ -8,26 +8,36 @@ import { PortfolioView } from '@/components/portfolio/portfolio-view';
 export default function PortfolioPage() {
   const [portfolio, setPortfolio] = useState<any>(null);
   const [userRole, setUserRole] = useState<'ADMIN' | 'USER'>('USER');
+  const refreshInProgress = useRef(false);
 
-  const loadPortfolio = async () => {
+  const loadPortfolio = useCallback(async () => {
+    if (refreshInProgress.current) return;
+    refreshInProgress.current = true;
+
     try {
-      const res = await fetch('/api/portfolio');
+      const res = await fetch('/api/portfolio', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         setPortfolio(data);
       }
 
-      const me = await fetch('/api/auth/me');
+      const me = await fetch('/api/auth/me', { cache: 'no-store' });
       if (me.ok) {
         const u = await me.json();
         if (u?.user) setUserRole(u.user.role);
       }
-    } catch {}
-  };
+    } catch {
+      // Keep the last successful portfolio visible during transient errors.
+    } finally {
+      refreshInProgress.current = false;
+    }
+  }, []);
 
   useEffect(() => {
-    loadPortfolio();
-  }, []);
+    void loadPortfolio();
+    const refreshTimer = window.setInterval(() => void loadPortfolio(), 3_000);
+    return () => window.clearInterval(refreshTimer);
+  }, [loadPortfolio]);
 
   return (
     <div className="min-h-screen bg-[#090d16] flex flex-col">

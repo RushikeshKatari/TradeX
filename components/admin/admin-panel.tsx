@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { formatINR } from '@/lib/utils';
-import { Users, UserPlus, DollarSign, ShieldAlert, CheckCircle, XCircle, Search, RefreshCw, AlertCircle } from 'lucide-react';
+import { Users, UserPlus, DollarSign, ShieldAlert, CheckCircle, XCircle, Search, RefreshCw, AlertCircle, RotateCcw, Trash2 } from 'lucide-react';
 
 interface AdminUser {
   id: string;
@@ -34,6 +34,11 @@ export function AdminPanel() {
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
   const [fundAmount, setFundAmount] = useState<number>(100000);
   const [fundReason, setFundReason] = useState<string>('Capital top-up for simulation competition');
+  const [resetUser, setResetUser] = useState<AdminUser | null>(null);
+  const [resetBalance, setResetBalance] = useState<number>(1000000);
+  const [resetReason, setResetReason] = useState('Reset virtual balance to starting capital');
+  const [isResetting, setIsResetting] = useState(false);
+  const [clearingUserId, setClearingUserId] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // New user form state
@@ -115,6 +120,58 @@ export function AdminPanel() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error allocating funds';
       setActionMsg({ type: 'error', text: msg });
+    }
+  };
+
+  const handleResetBalance = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetUser || isResetting) return;
+    setIsResetting(true);
+    setActionMsg(null);
+
+    try {
+      const res = await fetch(`/api/admin/users/${resetUser.id}/reset-balance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetBalance: Number(resetBalance), reason: resetReason }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Balance reset failed.');
+
+      setActionMsg({
+        type: 'success',
+        text: `${resetUser.displayName}'s virtual balance was set to ${formatINR(data.balanceAfter)}. An audit ledger entry was recorded.`,
+      });
+      setResetUser(null);
+      await loadUsers();
+    } catch (error) {
+      setActionMsg({ type: 'error', text: error instanceof Error ? error.message : 'Balance reset failed.' });
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  const handleClearUserHistory = async (user: AdminUser) => {
+    const confirmed = window.confirm(
+      `Permanently clear ${user._count.orders} orders and their related trades for ${user.displayName}? Their positions, holdings, cash balance, and fund ledger remain; reserved funds from pending buy orders will be released.`,
+    );
+    if (!confirmed) return;
+
+    setClearingUserId(user.id);
+    setActionMsg(null);
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}/orders`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not clear order history.');
+      setActionMsg({
+        type: 'success',
+        text: `Cleared ${data.deletedOrders} orders and ${data.deletedTrades} trades for ${user.displayName}; released ${formatINR(data.releasedReservedFunds)} from pending-order reserves.`,
+      });
+      await loadUsers();
+    } catch (error) {
+      setActionMsg({ type: 'error', text: error instanceof Error ? error.message : 'Could not clear order history.' });
+    } finally {
+      setClearingUserId(null);
     }
   };
 
@@ -302,12 +359,30 @@ export function AdminPanel() {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <div className="flex items-center justify-center gap-2">
+                      <div className="flex flex-wrap items-center justify-center gap-2">
                         <button
                           onClick={() => setSelectedUser(u)}
                           className="px-2.5 py-1 text-[11px] bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600 hover:text-white rounded border border-indigo-500/30 transition-all font-semibold"
                         >
                           Allocate Funds
+                        </button>
+                        <button
+                          onClick={() => {
+                            setResetUser(u);
+                            setResetBalance(1000000);
+                            setResetReason('Reset virtual balance to starting capital');
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] bg-cyan-600/20 text-cyan-300 hover:bg-cyan-600 hover:text-white rounded border border-cyan-500/30 transition-all font-semibold"
+                        >
+                          <RotateCcw className="h-3 w-3" /> Reset Balance
+                        </button>
+                        <button
+                          onClick={() => handleClearUserHistory(u)}
+                          disabled={clearingUserId === u.id || u._count.orders === 0}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] bg-rose-600/15 text-rose-300 hover:bg-rose-600 hover:text-white rounded border border-rose-500/30 transition-all font-semibold disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          {clearingUserId === u.id ? 'Clearing…' : 'Clear History'}
                         </button>
                         <button
                           onClick={() => handleToggleStatus(u)}
@@ -510,6 +585,58 @@ export function AdminPanel() {
                 >
                   Confirm Allocation
                 </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {resetUser && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#0f172a] border border-border rounded-xl p-6 shadow-2xl max-w-md w-full">
+            <h3 className="text-base font-bold text-white mb-1">Reset Virtual Balance</h3>
+            <p className="text-xs text-slate-400 mb-4">
+              Set <strong className="text-slate-200">{resetUser.displayName}</strong>’s cash balance to a new amount. Open positions and order history remain unchanged; existing reserved funds must still be covered. An audit ledger entry will be created.
+            </p>
+            <p className="mb-4 font-mono text-xs text-slate-300">Current balance: {formatINR(resetUser.virtualAccount?.balance ?? 0)}</p>
+            <form onSubmit={handleResetBalance} className="space-y-4">
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">New balance (₹)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  required
+                  value={resetBalance}
+                  onChange={(event) => setResetBalance(Number(event.target.value))}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-sm text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">Starts at ₹10,00,000; change it to the amount you want.</span>
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Reason (required for audit)</label>
+                <input
+                  type="text"
+                  required
+                  minLength={3}
+                  maxLength={200}
+                  value={resetReason}
+                  onChange={(event) => setResetReason(event.target.value)}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setResetUser(null)}
+                  disabled={isResetting}
+                  className="flex-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold disabled:opacity-50"
+                >Cancel</button>
+                <button
+                  type="submit"
+                  disabled={isResetting}
+                  className="flex-1 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold disabled:opacity-50"
+                >{isResetting ? 'Resetting…' : 'Confirm Balance Reset'}</button>
               </div>
             </form>
           </div>

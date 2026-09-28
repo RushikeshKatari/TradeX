@@ -205,3 +205,192 @@ export function runBacktestSimulation(
     signalCounts,
   };
 }
+
+/**
+ * Intraday long strangle simulation: for each session, enter CE and PE at the
+ * configured time on strikes surrounding spot and close both legs at exit time.
+ * Every price is read from timestamped historical option observations.
+ */
+export function runIntradayBacktest(
+  config: BacktestConfig,
+  historicalOptions: HistoricalOptionObservation[]
+): BacktestResult {
+  const strikeCount = config.strikeCount ?? 2;
+  const basePerSide = config.initialPerSideInvestment ?? 100_000;
+  const entryTime = config.entryTime ?? '09:30';
+  const exitTime = config.exitTime ?? '15:15';
+  const initialCapital = basePerSide * 2 * strikeCount;
+  const emptyMetrics: BacktestMetrics = {
+    totalTrades: 0, winningTrades: 0, losingTrades: 0, winRate: 0,
+    totalPnl: 0, profitFactor: 0, maxDrawdown: 0, maxDrawdownPct: 0,
+    finalCapital: initialCapital, returnOnCapital: 0, averageTradePnl: 0,
+  };
+  const insufficient = (message: string): BacktestResult => ({
+    status: 'INSUFFICIENT_DATA', message, config, metrics: emptyMetrics,
+    trades: [], equityCurve: [], regimePerformance: [], signalCounts: {},
+    dailyResults: [], strikeResults: [],
+    reinvestment: { reinvestmentRate: 0.5, initialPerSideInvestment: basePerSide, finalPerSideInvestment: basePerSide, totalReinvested: 0 },
+  });
+
+  if (strikeCount < 2 || !Number.isInteger(strikeCount)) return insufficient('Choose at least two strikes so the backtest can enter above and below spot.');
+  if (!/^\d{2}:\d{2}$/.test(entryTime) || !/^\d{2}:\d{2}$/.test(exitTime) || entryTime >= exitTime) {
+    return insufficient('Enter valid session times, with exit time later than entry time.');
+  }
+  if (!historicalOptions.length) return insufficient('Upload timestamped CE/PE historical option prices for the selected index and dates.');
+
+  const exchangeDate = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+  const targetInstant = (date: string, time: string) => Date.parse(`${date}T${time}:00+05:30`);
+  const dates = [...new Set(historicalOptions.map((row) => exchangeDate(row.timestamp)))].sort();
+  const trades: BacktestTrade[] = [];
+  const dailyResults: NonNullable<BacktestResult['dailyResults']> = [];
+  const strikeAcc = new Map<number, { sides: Set<'ABOVE' | 'BELOW'>; days: Set<string>; cePnl: number; pePnl: number; daily: Map<string, number> }>();
+  const initialCapitalForMetrics = initialCapital;
+  let capital = initialCapital;
+  let peak = capital;
+  let maxDrawdown = 0;
+  let sideBudget = basePerSide;
+  let totalReinvested = 0;
+  const maxQuoteGapMs = 5 * 60_000;
+
+  for (const date of dates) {
+    const rows = historicalOptions.filter((row) => exchangeDate(row.timestamp) === date);
+    const selectSnapshot = (time: string) => {
+      const target = targetInstant(date, time);
+      const groups = new Map<string, HistoricalOptionObservation[]>();
+      for (const row of rows) {
+        const rowTime = Date.parse(row.timestamp);
+        const gap = target - rowTime;
+        if (gap < 0 || gap > maxQuoteGapMs) continue;
+        const list = groups.get(row.timestamp) || [];
+        list.push(row);
+        groups.set(row.timestamp, list);
+      }
+      const completePairs = (snapshot: HistoricalOptionObservation[]) => {
+        const keys = new Set(snapshot.map((row) => `${row.expiry}|${row.strike}|${row.optionType}`));
+        return [...keys].filter((key) => key.endsWith('|CE') && keys.has(`${key.slice(0, -2)}PE`)).length;
+      };
+      return [...groups.entries()]
+        .map(([timestamp, snapshot]) => ({ timestamp, snapshot, pairs: completePairs(snapshot), gap: Math.abs(Date.parse(timestamp) - target) }))
+        .filter((item) => item.pairs > 0)
+        .sort((a, b) => a.gap - b.gap || b.pairs - a.pairs)[0]?.snapshot || [];
+    };
+    const entryRows = selectSnapshot(entryTime);
+    const exitRows = selectSnapshot(exitTime);
+    const emptyDay = { date, pnl: 0, cePnl: 0, pePnl: 0, strikesEntered: [] as number[], capital, reinvested: 0, investmentPerSideNextDay: sideBudget };
+    if (!entryRows.length || !exitRows.length) {
+      dailyResults.push(emptyDay);
+      continue;
+    }
+    const entrySpot = entryRows.reduce((sum, row) => sum + row.underlyingPrice, 0) / entryRows.length;
+    const strikeKeys = new Set(entryRows.filter((row) => row.optionType === 'CE').map((row) => `${row.expiry}|${row.strike}`));
+    const exitKeys = new Set(exitRows.map((row) => `${row.expiry}|${row.strike}|${row.optionType}`));
+    const candidates = [...strikeKeys].map((key) => {
+      const [expiry, strikeText] = key.split('|');
+      const strike = Number(strikeText);
+      const ce = entryRows.find((row) => row.expiry === expiry && row.strike === strike && row.optionType === 'CE');
+      const pe = entryRows.find((row) => row.expiry === expiry && row.strike === strike && row.optionType === 'PE');
+      const exitCe = exitRows.find((row) => row.expiry === expiry && row.strike === strike && row.optionType === 'CE');
+      const exitPe = exitRows.find((row) => row.expiry === expiry && row.strike === strike && row.optionType === 'PE');
+      if (!ce || !pe || !exitCe || !exitPe || !exitKeys.has(`${expiry}|${strike}|CE`) || !exitKeys.has(`${expiry}|${strike}|PE`)) return null;
+      if (ce.ltp <= 0 || pe.ltp <= 0 || exitCe.ltp < 0 || exitPe.ltp < 0) return null;
+      const canBuy = (premium: number) => Math.floor(sideBudget / ((premium + config.slippagePerUnit) * config.lotSize)) > 0;
+      if (!canBuy(ce.ltp) || !canBuy(pe.ltp)) return null;
+      const side: 'ABOVE' | 'BELOW' | null = strike > entrySpot ? 'ABOVE' : strike < entrySpot ? 'BELOW' : null;
+      return side ? { strike, side, expiry, ce, pe, exitCe, exitPe, distance: Math.abs(strike - entrySpot) } : null;
+    }).filter((row): row is NonNullable<typeof row> => row !== null);
+    const nearestExpiryByStrike = new Map<number, (typeof candidates)[number]>();
+    for (const candidate of candidates) {
+      const current = nearestExpiryByStrike.get(candidate.strike);
+      const candidateExpiry = Date.parse(candidate.expiry);
+      const currentExpiry = current ? Date.parse(current.expiry) : Infinity;
+      const nearer = Number.isFinite(candidateExpiry) && Number.isFinite(currentExpiry)
+        ? candidateExpiry < currentExpiry
+        : !current || candidate.expiry < current.expiry;
+      if (!current || nearer) nearestExpiryByStrike.set(candidate.strike, candidate);
+    }
+    const uniqueCandidates = [...nearestExpiryByStrike.values()];
+    const above = uniqueCandidates.filter((row) => row.side === 'ABOVE').sort((a, b) => a.distance - b.distance);
+    const below = uniqueCandidates.filter((row) => row.side === 'BELOW').sort((a, b) => a.distance - b.distance);
+    const aboveCount = Math.ceil(strikeCount / 2);
+    const belowCount = Math.floor(strikeCount / 2);
+    const selected = [...above.slice(0, aboveCount), ...below.slice(0, belowCount)];
+    if (selected.length !== strikeCount) {
+      dailyResults.push(emptyDay);
+      continue;
+    }
+
+    let dayPnl = 0;
+    let dayCePnl = 0;
+    let dayPePnl = 0;
+    for (const option of selected) {
+      const legRows = [
+        { type: 'CE' as const, entry: option.ce.ltp, exit: option.exitCe.ltp },
+        { type: 'PE' as const, entry: option.pe.ltp, exit: option.exitPe.ltp },
+      ];
+      let strikePnl = 0;
+      let strikeCePnl = 0;
+      let strikePePnl = 0;
+      for (const leg of legRows) {
+        const adjustedEntry = leg.entry + config.slippagePerUnit;
+        const adjustedExit = Math.max(0.01, leg.exit - config.slippagePerUnit);
+        const lotValue = adjustedEntry * config.lotSize;
+        const quantity = lotValue > 0 ? Math.floor(sideBudget / lotValue) * config.lotSize : 0;
+        if (!quantity) continue;
+        const pnl = Number(((adjustedExit - adjustedEntry) * quantity - 2 * config.costPerTrade).toFixed(2));
+        const trade: BacktestTrade = {
+          id: `BT-${trades.length + 1}`, date: `${date}T${exitTime}:00+05:30`, symbol: config.symbol,
+          action: 'BUY', strike: option.strike, optionType: leg.type,
+          entryPrice: Number(adjustedEntry.toFixed(2)), exitPrice: Number(adjustedExit.toFixed(2)),
+          pnl, returnPct: Number((pnl / (adjustedEntry * quantity) * 100).toFixed(2)),
+          regime: 'INTRADAY_STRANGLE', reason: `${option.side} spot strike; ${entryTime} entry / ${exitTime} exit`,
+        };
+        trades.push(trade);
+        strikePnl += pnl;
+        dayPnl += pnl;
+        if (leg.type === 'CE') { dayCePnl += pnl; strikeCePnl += pnl; }
+        else { dayPePnl += pnl; strikePePnl += pnl; }
+      }
+      const acc = strikeAcc.get(option.strike) || { sides: new Set<'ABOVE' | 'BELOW'>(), days: new Set<string>(), cePnl: 0, pePnl: 0, daily: new Map<string, number>() };
+      acc.sides.add(option.side);
+      acc.days.add(date);
+      acc.cePnl += strikeCePnl;
+      acc.pePnl += strikePePnl;
+      acc.daily.set(date, (acc.daily.get(date) || 0) + strikePnl);
+      strikeAcc.set(option.strike, acc);
+    }
+    capital = Number((capital + dayPnl).toFixed(2));
+    peak = Math.max(peak, capital);
+    maxDrawdown = Math.max(maxDrawdown, peak - capital);
+    const reinvested = dayPnl > 0 ? Number((dayPnl * 0.5).toFixed(2)) : 0;
+    totalReinvested += reinvested;
+    const nextDaySideBudget = sideBudget + reinvested / strikeCount / 2;
+    dailyResults.push({ date, pnl: Number(dayPnl.toFixed(2)), cePnl: Number(dayCePnl.toFixed(2)), pePnl: Number(dayPePnl.toFixed(2)), strikesEntered: selected.map((row) => row.strike).sort((a, b) => a - b), capital, reinvested, investmentPerSideNextDay: Number(nextDaySideBudget.toFixed(2)) });
+    sideBudget = nextDaySideBudget;
+  }
+
+  if (!trades.length) return insufficient('No complete CE/PE strike pairs were available at both selected times. Upload intraday data with both sides for strikes above and below spot (within 5 minutes of each time).');
+  const winners = trades.filter((trade) => trade.pnl > 0).length;
+  const grossProfit = trades.filter((trade) => trade.pnl > 0).reduce((sum, trade) => sum + trade.pnl, 0);
+  const grossLoss = Math.abs(trades.filter((trade) => trade.pnl < 0).reduce((sum, trade) => sum + trade.pnl, 0));
+  const totalPnl = Number((capital - initialCapitalForMetrics).toFixed(2));
+  const metrics: BacktestMetrics = {
+    totalTrades: trades.length, winningTrades: winners, losingTrades: trades.length - winners,
+    winRate: Number((winners / trades.length * 100).toFixed(1)), totalPnl,
+    profitFactor: grossLoss ? Number((grossProfit / grossLoss).toFixed(2)) : grossProfit ? 99 : 0,
+    maxDrawdown: Number(maxDrawdown.toFixed(2)), maxDrawdownPct: peak ? Number((maxDrawdown / peak * 100).toFixed(1)) : 0,
+    finalCapital: capital, returnOnCapital: Number((totalPnl / initialCapitalForMetrics * 100).toFixed(2)),
+    averageTradePnl: Number((totalPnl / trades.length).toFixed(2)),
+  };
+  const strikeResults = [...strikeAcc.entries()].sort((a, b) => a[0] - b[0]).map(([strike, acc]) => ({
+    strike, side: (acc.sides.has('ABOVE') && acc.sides.has('BELOW') ? 'BOTH' : acc.sides.has('ABOVE') ? 'ABOVE' : 'BELOW') as 'ABOVE' | 'BELOW' | 'BOTH', days: acc.days.size,
+    cePnl: Number(acc.cePnl.toFixed(2)), pePnl: Number(acc.pePnl.toFixed(2)),
+    totalPnl: Number((acc.cePnl + acc.pePnl).toFixed(2)),
+    dailyPnl: dates.map((date) => ({ date, pnl: Number((acc.daily.get(date) || 0).toFixed(2)) })),
+  }));
+  return {
+    status: 'SUCCESS', config, metrics, trades: trades.reverse(),
+    equityCurve: dailyResults.map((row) => ({ date: row.date, equity: row.capital })),
+    regimePerformance: [], signalCounts: {}, dailyResults, strikeResults,
+    reinvestment: { reinvestmentRate: 0.5, initialPerSideInvestment: basePerSide, finalPerSideInvestment: Number(sideBudget.toFixed(2)), totalReinvested: Number(totalReinvested.toFixed(2)) },
+  };
+}

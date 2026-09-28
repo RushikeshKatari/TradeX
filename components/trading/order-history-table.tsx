@@ -42,7 +42,7 @@ export function OrderHistoryTable({ orders, onOrderCancelled }: OrderHistoryTabl
         <h3 className="text-sm font-bold text-white uppercase tracking-wider">
           Order Log & Historical Executions ({orders.length})
         </h3>
-        <span className="text-xs text-slate-500 font-mono">Immutable Order Records</span>
+        <span className="text-xs text-slate-500 font-mono">Simulated Order Records</span>
       </div>
 
       {orders.length === 0 ? (

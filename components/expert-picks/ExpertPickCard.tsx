@@ -3,15 +3,8 @@
 import React, { useMemo, useState } from 'react';
 import { ExpertPickCandidate } from '@/types/expert-picks';
 import { formatINR, formatNumber, cn } from '@/lib/utils';
+import { isExpertPickEntryAllowed } from '@/lib/market-data/calendar';
 import { Zap } from 'lucide-react';
-
-const EXPERT_PICKS_EXIT_TIME = '15:15';
-function isAfterExpertPicksExitTime(): boolean {
-  const now = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour12: false });
-  const [hours, minutes] = now.split(':').map(Number);
-  const [exitHours, exitMinutes] = EXPERT_PICKS_EXIT_TIME.split(':').map(Number);
-  return hours * 60 + minutes >= exitHours * 60 + exitMinutes;
-}
 
 interface Props {
   pick: ExpertPickCandidate;
@@ -48,8 +41,8 @@ export function ExpertPickCard({ pick, onEnter, isEntering, availableCash, onSel
   const pePick = pick.optionType === 'PE' ? pick : pairedPick;
   const ceLots = cePick ? Math.floor(Math.min(100000, availableCash) / (cePick.ltp * cePick.lotSize)) : 0;
   const peLots = pePick ? Math.floor(Math.min(100000, availableCash) / (pePick.ltp * pePick.lotSize)) : 0;
-  const afterExitTime = isAfterExpertPicksExitTime();
-  const disabled = isNoTrade || insufficientCash || isEntering || afterExitTime;
+  const canEnter = isExpertPickEntryAllowed();
+  const disabled = isNoTrade || insufficientCash || isEntering || !canEnter;
 
   const handleEnterClick = () => {
     if (!disabled) {
@@ -148,7 +141,7 @@ export function ExpertPickCard({ pick, onEnter, isEntering, availableCash, onSel
               : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-[0_0_15px_rgba(79,70,229,0.3)] hover:shadow-[0_0_20px_rgba(79,70,229,0.5)]"
           )}
         >
-          {isEntering ? 'Entering...' : afterExitTime ? 'Market Closed' : insufficientCash ? 'Insufficient Cash' : 'Enter Trade'}
+          {isEntering ? 'Entering...' : !canEnter ? 'Entry Window Closed' : insufficientCash ? 'Insufficient Cash' : 'Enter Trade'}
         </button>
       </div>
 

@@ -53,6 +53,7 @@ export interface ExpertPickPosition {
 export interface ExpertPicksSummary {
   totalInvestment: number;
   currentPnl: number;
+  realizedPnl: number;
   openPositions: number;
   availableCash: number;
 }

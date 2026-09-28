@@ -1,78 +1,67 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getMarketDataProvider } from '@/lib/market-data';
 import { BacktestConfig } from '@/types/backtest';
-import { HistoricalOptionDataProvider } from '@/lib/market-data/historical-option-provider';
-import { runBacktestSimulation } from '@/lib/analysis/backtesting-engine';
+import { HistoricalOptionDataProvider, parseHistoricalOptionsCsv } from '@/lib/market-data/historical-option-provider';
+import { runIntradayBacktest } from '@/lib/analysis/backtesting-engine';
 
-function unavailableResult(config: BacktestConfig, details: string) {
-  return {
-    status: 'INSUFFICIENT_DATA' as const,
-    message: details,
-    config,
-    metrics: {
-      totalTrades: 0,
-      winningTrades: 0,
-      losingTrades: 0,
-      winRate: 0,
-      totalPnl: 0,
-      profitFactor: 0,
-      maxDrawdown: 0,
-      maxDrawdownPct: 0,
-      finalCapital: config.startingCapital,
-      returnOnCapital: 0,
-      averageTradePnl: 0,
-    },
-    trades: [],
-    equityCurve: [],
-    regimePerformance: [],
-    signalCounts: { LONG_CALL: 0, LONG_PUT: 0, VOLATILITY_STRATEGY: 0, NO_TRADE: 0 },
-  };
-}
+const ALLOWED_SYMBOLS = new Set(['NIFTY50', 'SENSEX', 'BANKNIFTY']);
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const startingCapital = Number(body.startingCapital);
+    const isMultipart = request.headers.get('content-type')?.includes('multipart/form-data');
+    let body: Record<string, FormDataEntryValue | string>;
+    let upload: File | null = null;
+    if (isMultipart) {
+      const form = await request.formData();
+      body = Object.fromEntries([...form.entries()].filter(([key]) => key !== 'file'));
+      const candidate = form.get('file');
+      upload = candidate instanceof File && candidate.size ? candidate : null;
+    } else {
+      body = await request.json();
+    }
+
+    const symbol = String(body.symbol || '').toUpperCase();
+    const from = String(body.from || '');
+    const to = String(body.to || '');
+    const entryTime = String(body.entryTime || '');
+    const exitTime = String(body.exitTime || '');
+    const strikeCount = Number(body.strikeCount);
     const lotSize = Number(body.lotSize);
     const slippagePerUnit = Number(body.slippagePerUnit);
     const costPerTrade = Number(body.costPerTrade);
+    const initialPerSideInvestment = Number(body.initialPerSideInvestment || 100000);
 
-    if (!Number.isFinite(startingCapital) || startingCapital <= 0) {
-      return NextResponse.json({ error: 'Starting capital must be greater than zero.' }, { status: 400 });
+    if (!ALLOWED_SYMBOLS.has(symbol)) return NextResponse.json({ error: 'Choose NIFTY, SENSEX, or BANK NIFTY.' }, { status: 400 });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+      return NextResponse.json({ error: 'Choose a valid date range.' }, { status: 400 });
     }
-    if (!Number.isFinite(lotSize) || lotSize <= 0) {
-      return NextResponse.json({ error: 'Lot size must be greater than zero.' }, { status: 400 });
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(entryTime) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(exitTime) || entryTime >= exitTime) {
+      return NextResponse.json({ error: 'Enter valid times, with the exit time later than the entry time.' }, { status: 400 });
+    }
+    if (!Number.isInteger(strikeCount) || strikeCount < 2 || strikeCount > 40) {
+      return NextResponse.json({ error: 'Strike count must be an integer from 2 to 40.' }, { status: 400 });
+    }
+    if (!Number.isFinite(lotSize) || lotSize <= 0 || !Number.isFinite(initialPerSideInvestment) || initialPerSideInvestment <= 0) {
+      return NextResponse.json({ error: 'Lot size and investment per CE/PE side must be greater than zero.' }, { status: 400 });
     }
     if (!Number.isFinite(slippagePerUnit) || slippagePerUnit < 0 || !Number.isFinite(costPerTrade) || costPerTrade < 0) {
       return NextResponse.json({ error: 'Slippage and cost per trade cannot be negative.' }, { status: 400 });
     }
+    if (upload && upload.size > 20 * 1024 * 1024) {
+      return NextResponse.json({ error: 'The uploaded CSV must be 20 MB or smaller.' }, { status: 413 });
+    }
 
     const config: BacktestConfig = {
-      symbol: (body.symbol || 'NIFTY50').toUpperCase(),
-      startingCapital,
-      lotSize,
-      slippagePerUnit,
-      costPerTrade,
-      strategy: body.strategy || 'REGIME_MOMENTUM',
+      symbol, startingCapital: initialPerSideInvestment * 2 * strikeCount,
+      lotSize, slippagePerUnit, costPerTrade, strategy: 'VOLATILITY_STRADDLE',
+      entryTime, exitTime, strikeCount, initialPerSideInvestment,
     };
-
-    const provider = getMarketDataProvider();
-
-    // The current TypeScript market-data contract has historical underlying
-    // candles and a *current* option chain only. It has no historical option
-    // contracts/premiums, so running the old candle-only simulation would
-    // fabricate option data and produce invalid backtest results.
-    const from = typeof body.from === 'string' ? body.from : undefined;
-    const to = typeof body.to === 'string' ? body.to : undefined;
-    const options = await new HistoricalOptionDataProvider().getHistoricalOptions(config.symbol, from, to);
-    const candles = Array.from(new Map(options.map((row) => [row.timestamp.slice(0, 10), { time: Math.floor(Date.parse(row.timestamp) / 1000), open: row.underlyingPrice, high: row.underlyingPrice, low: row.underlyingPrice, close: row.underlyingPrice, volume: row.volume || 0 }])).values());
-    if (candles.length < 25) return NextResponse.json(unavailableResult(config, 'Historical option data unavailable for the selected period. At least 25 dated sessions are required.'));
-    return NextResponse.json(runBacktestSimulation(candles, config, options));
+    const options = upload
+      ? parseHistoricalOptionsCsv(await upload.text(), symbol, from, to)
+      : await new HistoricalOptionDataProvider().getHistoricalOptions(symbol, from, to);
+    if (!options.length) return NextResponse.json({ error: 'No matching historical option prices were found for this index and date range.' }, { status: 422 });
+    return NextResponse.json(runIntradayBacktest(config, options));
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      { error: 'Backtest failed to execute', details: msg },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Backtest failed to execute', details: msg }, { status: 500 });
   }
 }

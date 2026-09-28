@@ -171,7 +171,7 @@ export default function ExpertPicksPage() {
           ) : data ? (
             <>
               {/* Summary Bar */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <div className="bg-[#0f172a] border border-border rounded-xl p-4 shadow-lg">
                   <div className="text-slate-400 text-xs font-semibold uppercase tracking-wider">Available Cash</div>
                   <div className="text-xl font-mono text-white mt-1">{formatINR(data.summary.availableCash)}</div>
@@ -184,6 +184,12 @@ export default function ExpertPicksPage() {
                   <div className="text-slate-400 text-xs font-semibold uppercase tracking-wider">Current P&L</div>
                   <div className={`text-xl font-mono mt-1 ${data.summary.currentPnl > 0 ? 'text-emerald-400' : data.summary.currentPnl < 0 ? 'text-rose-400' : 'text-slate-300'}`}>
                     {data.summary.currentPnl > 0 ? '+' : ''}{formatINR(data.summary.currentPnl)}
+                  </div>
+                </div>
+                <div className="bg-[#0f172a] border border-border rounded-xl p-4 shadow-lg">
+                  <div className="text-slate-400 text-xs font-semibold uppercase tracking-wider">Realized P&L</div>
+                  <div className={`text-xl font-mono mt-1 ${data.summary.realizedPnl > 0 ? 'text-emerald-400' : data.summary.realizedPnl < 0 ? 'text-rose-400' : 'text-slate-300'}`}>
+                    {data.summary.realizedPnl > 0 ? '+' : ''}{formatINR(data.summary.realizedPnl)}
                   </div>
                 </div>
                 <div className="bg-[#0f172a] border border-border rounded-xl p-4 shadow-lg">
@@ -235,9 +241,9 @@ export default function ExpertPicksPage() {
               <section className="bg-[#0f172a] border border-border rounded-xl p-5">
                 <h2 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Exit Conditions</h2>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                  <div className="border border-border rounded-lg p-3"><b className="text-amber-400">50% LOSS STOP</b><p className="text-slate-400 mt-1">Exit when side value falls to 50% of investment, during 09:15–15:15 IST</p><span className="text-slate-300">NOT TRIGGERED</span></div>
+                  <div className="border border-border rounded-lg p-3"><b className="text-amber-400">50% LOSS STOP</b><p className="text-slate-400 mt-1">Exit when side value falls to 50% of investment, during 09:15–15:30 IST</p><span className="text-slate-300">NOT TRIGGERED</span></div>
                   <div className="border border-border rounded-lg p-3"><b className="text-cyan-400">COMBINED PROFIT TARGET</b><p className="text-slate-400 mt-1">Profit exceeds combined CE + PE investment</p><span className="text-slate-300">NOT TRIGGERED</span></div>
-                  <div className="border border-border rounded-lg p-3"><b className="text-indigo-400">TIME EXIT</b><p className="text-slate-400 mt-1">Auto exit at 3:15 PM IST</p><span className="text-slate-300">ACTIVE / NOT TRIGGERED</span></div>
+                  <div className="border border-border rounded-lg p-3"><b className="text-indigo-400">TIME EXIT</b><p className="text-slate-400 mt-1">Sell all open option positions at 3:45 PM IST</p><span className="text-slate-300">ACTIVE / NOT TRIGGERED</span></div>
                 </div>
               </section>
 

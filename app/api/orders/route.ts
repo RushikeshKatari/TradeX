@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth/session';
 import { prisma } from '@/lib/db/prisma';
 import { orderSchema } from '@/lib/validation/schemas';
-import { executePaperOrder, ExecutionError } from '@/lib/trading/execution';
+import { clearUserOrderHistory, executePaperOrder, ExecutionError } from '@/lib/trading/execution';
 import { checkRateLimit } from '@/lib/security/rate-limit';
 
 export async function GET() {
@@ -19,6 +19,25 @@ export async function GET() {
   });
 
   return NextResponse.json(orders);
+}
+
+export async function DELETE() {
+  const user = await getSessionUser();
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const result = await clearUserOrderHistory({
+      targetUserId: user.userId,
+      actorUserId: user.userId,
+      actorRole: user.role,
+    });
+    return NextResponse.json({ success: true, ...result });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Could not clear order history.';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
 
 export async function POST(req: NextRequest) {
