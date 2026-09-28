@@ -83,7 +83,7 @@ export default function ExpertPicksPage() {
       if (!res.ok) throw new Error(result.error || 'Failed to enter trade');
       
       setMessage({ text: 'Trade entered successfully', type: 'success' });
-      fetchData(false);
+      await fetchData(false);
     } catch (err: any) {
       setMessage({ text: err.message, type: 'error' });
     } finally {
