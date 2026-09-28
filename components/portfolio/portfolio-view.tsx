@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { PortfolioSummary, PositionView, HoldingView } from '@/types/trading';
 import { formatINR } from '@/lib/utils';
 import { ArrowUpRight, ArrowDownRight, Wallet, TrendingUp, PieChart, ShieldAlert } from 'lucide-react';
@@ -14,6 +14,7 @@ interface PortfolioViewProps {
 }
 
 export function PortfolioView({ summary, positions, holdings, onRefresh }: PortfolioViewProps) {
+  const [exitingId, setExitingId] = useState<string | null>(null);
   const isTotalPnlPositive = summary.totalUnrealizedPnL + summary.totalRealizedPnL >= 0;
 
   return (
@@ -107,6 +108,8 @@ export function PortfolioView({ summary, positions, holdings, onRefresh }: Portf
                 <tr className="bg-slate-950 text-slate-400 border-b border-border text-[11px]">
                   <th className="py-2.5 px-4 text-left">Symbol</th>
                   <th className="py-2.5 px-3 text-right">Quantity</th>
+                  <th className="py-2.5 px-3 text-right">Lots</th>
+                  <th className="py-2.5 px-3 text-right">Lot Size</th>
                   <th className="py-2.5 px-3 text-right">Avg Entry</th>
                   <th className="py-2.5 px-3 text-right">LTP</th>
                   <th className="py-2.5 px-3 text-right">Invested</th>
@@ -118,6 +121,24 @@ export function PortfolioView({ summary, positions, holdings, onRefresh }: Portf
               <tbody className="divide-y divide-slate-800/60">
                 {positions.map((pos) => {
                   const isPos = pos.unrealizedPnL >= 0;
+                  const isOption = pos.instrumentType === 'OPTION';
+                  const displayedCurrentValue = isOption
+                    ? pos.currentPrice * (pos.lotSize || 0) * (pos.lots || 0)
+                    : pos.currentValue;
+                  const handleManualExit = async () => {
+                    setExitingId(pos.id);
+                    try {
+                      const response = await fetch('/api/expert-picks/exit', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ symbol: pos.symbol, quantity: pos.quantity, price: pos.currentPrice, reason: 'MANUAL_EXIT' }),
+                      });
+                      if (!response.ok) throw new Error('Manual exit failed');
+                      onRefresh?.();
+                    } finally {
+                      setExitingId(null);
+                    }
+                  };
                   return (
                     <tr key={pos.id} className="hover:bg-slate-800/50 transition-colors">
                       <td className="py-3 px-4 text-left font-bold text-slate-200">
@@ -126,20 +147,23 @@ export function PortfolioView({ summary, positions, holdings, onRefresh }: Portf
                         </Link>
                       </td>
                       <td className="py-3 px-3 text-right text-slate-300">{pos.quantity}</td>
+                      <td className="py-3 px-3 text-right text-slate-300">{pos.lots || '—'}</td>
+                      <td className="py-3 px-3 text-right text-slate-300">{pos.lotSize || '—'}</td>
                       <td className="py-3 px-3 text-right text-slate-400">{formatINR(pos.averageEntryPrice)}</td>
                       <td className="py-3 px-3 text-right text-slate-200">{formatINR(pos.currentPrice)}</td>
                       <td className="py-3 px-3 text-right text-slate-400">{formatINR(pos.investedValue)}</td>
-                      <td className="py-3 px-3 text-right font-medium text-slate-200">{formatINR(pos.currentValue)}</td>
+                      <td className="py-3 px-3 text-right font-medium text-slate-200">{formatINR(displayedCurrentValue)}</td>
                       <td className={`py-3 px-3 text-right font-bold ${isPos ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {isPos ? '+' : ''}{formatINR(pos.unrealizedPnL)} ({isPos ? '+' : ''}{pos.unrealizedPnLPercent}%)
                       </td>
                       <td className="py-3 px-4 text-center">
-                        <Link
-                          href={`/stocks/${pos.symbol}`}
-                          className="px-2.5 py-1 text-[11px] font-semibold bg-rose-600/20 text-rose-300 hover:bg-rose-600 hover:text-white rounded border border-rose-500/30 transition-all"
-                        >
-                          Trade / Square off
-                        </Link>
+                        {isOption ? (
+                          <button onClick={handleManualExit} disabled={exitingId === pos.id} className="px-2.5 py-1 text-[11px] font-semibold bg-rose-600/20 text-rose-300 hover:bg-rose-600 hover:text-white rounded border border-rose-500/30 transition-all">
+                            {exitingId === pos.id ? 'Exiting...' : 'Manual Exit'}
+                          </button>
+                        ) : (
+                          <Link href={`/stocks/${pos.symbol}`} className="px-2.5 py-1 text-[11px] font-semibold bg-rose-600/20 text-rose-300 hover:bg-rose-600 hover:text-white rounded border border-rose-500/30 transition-all">Trade / Square off</Link>
+                        )}
                       </td>
                     </tr>
                   );

@@ -13,7 +13,9 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "python:install": "python3 -m venv services/stock-analysis/.venv && ./services/stock-analysis/.venv/bin/pip install -r services/stock-analysis/requirements.txt",
+    "python:start": "./services/stock-analysis/.venv/bin/python services/stock-analysis/app.py"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

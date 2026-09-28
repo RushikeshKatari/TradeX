@@ -12,6 +12,9 @@ import {
   Bookmark,
   ShieldAlert,
   BarChart2,
+  Compass,
+  BarChart3,
+  Zap
 } from 'lucide-react';
 import { UserRole } from '@/types/user';
 
@@ -26,6 +29,9 @@ export function Sidebar({ userRole }: SidebarProps) {
     { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { label: 'Stocks & Charts', href: '/stocks/RELIANCE', icon: TrendingUp },
     { label: 'Options Chain', href: '/options/NIFTY50', icon: Layers },
+    { label: 'Market Regime', href: '/regime', icon: Compass },
+    { label: 'Expert Picks', href: '/expert-picks', icon: Zap },
+    { label: 'Backtest Engine', href: '/backtest', icon: BarChart3 },
     { label: 'Portfolio & P&L', href: '/portfolio', icon: Briefcase },
     { label: 'Orders & Trades', href: '/orders', icon: ListOrdered },
     { label: 'Watchlist', href: '/watchlist', icon: Bookmark },

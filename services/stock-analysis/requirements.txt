@@ -1,0 +1,9 @@
+# Primary keyless NSE option-chain client
+option-chain-live @ git+https://github.com/clashofattack7-create/option-chain-live.git
+jugaad-data>=0.30
+pandas>=1.5
+numpy>=1.24
+flask>=2.3
+flask-cors>=4.0
+flask-socketio>=5.3
+python-dotenv>=1.0

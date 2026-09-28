@@ -460,6 +460,7 @@ export async function getPortfolioSummary(userId: string): Promise<{
   let totalRealizedPnL = new Decimal(0);
 
   const positions: PositionView[] = [];
+  const optionLotSizes: Record<string, number> = { NIFTY50: 75, BANKNIFTY: 30, SENSEX: 20, NIFTYIT: 25 };
 
   for (const pos of rawPositions) {
     const quote = await provider.getQuote(pos.symbol).catch(() => null);
@@ -480,6 +481,15 @@ export async function getPortfolioSummary(userId: string): Promise<{
     totalUnrealizedPnL = totalUnrealizedPnL.plus(unPnl);
     totalRealizedPnL = totalRealizedPnL.plus(realPnl);
 
+    const optionMatch = pos.symbol.match(/^([A-Z0-9]+)_(\d+(?:\.\d+)?)_(CE|PE)$/);
+    const optionMetadata = optionMatch ? {
+      instrumentType: 'OPTION' as const,
+      optionType: optionMatch[3] as 'CE' | 'PE',
+      strike: Number(optionMatch[2]),
+      lotSize: optionLotSizes[optionMatch[1]] || 75,
+      lots: Math.floor(pos.quantity / (optionLotSizes[optionMatch[1]] || 75)),
+    } : { instrumentType: 'EQUITY' as const };
+
     positions.push({
       id: pos.id,
       symbol: pos.symbol,
@@ -492,6 +502,7 @@ export async function getPortfolioSummary(userId: string): Promise<{
       unrealizedPnL: roundMoney(unPnl),
       unrealizedPnLPercent: Number(unPnlPct.toFixed(2)),
       realizedPnL: roundMoney(realPnl),
+      ...optionMetadata,
     });
   }
 

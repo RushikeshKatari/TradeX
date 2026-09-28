@@ -35,6 +35,11 @@ export interface PositionView {
   unrealizedPnL: number;
   unrealizedPnLPercent: number;
   realizedPnL: number;
+  instrumentType?: 'EQUITY' | 'OPTION';
+  optionType?: 'CE' | 'PE';
+  strike?: number;
+  lotSize?: number;
+  lots?: number;
 }
 
 export interface HoldingView {

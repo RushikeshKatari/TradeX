@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NSE Options Analysis & Paper Trading</title>
+    <meta name="description" content="Real-time Indian stock and options market analysis with paper trading">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- ═══ HEADER ═══ -->
+    <header class="top-bar">
+        <div class="top-bar__left">
+            <div class="logo">
+                <span class="logo__icon">◈</span>
+                <span class="logo__text">NSE<span class="logo__accent">Pulse</span></span>
+            </div>
+            <div class="market-status" id="market-status">
+                <span class="status-dot status-dot--connecting"></span>
+                <span id="status-text">Connecting…</span>
+            </div>
+        </div>
+        <div class="top-bar__center">
+            <div class="symbol-tabs">
+                <button class="tab tab--active" data-symbol="NIFTY" id="tab-nifty">NIFTY 50</button>
+                <button class="tab" data-symbol="BANKNIFTY" id="tab-banknifty">BANK NIFTY</button>
+            </div>
+        </div>
+        <div class="top-bar__right">
+            <div class="provider-badge" id="provider-badge">
+                <span class="provider-badge__label">Source:</span>
+                <span class="provider-badge__name" id="provider-name">—</span>
+            </div>
+            <span class="timestamp" id="last-updated">—</span>
+            <button class="btn btn--refresh" id="btn-refresh" title="Refresh">⟳</button>
+        </div>
+    </header>
+
+    <!-- ═══ MAIN CONTENT ═══ -->
+    <main class="dashboard">
+        <!-- ─── Row 1: Price + Regime ─── -->
+        <section class="row row--hero">
+            <div class="card card--price" id="card-price">
+                <div class="card__header">
+                    <h2 id="price-symbol">NIFTY 50</h2>
+                    <span class="badge" id="regime-badge">—</span>
+                </div>
+                <div class="price-display">
+                    <span class="price-display__value" id="spot-price">—</span>
+                    <span class="price-display__change" id="price-change">—</span>
+                </div>
+                <div class="price-meta">
+                    <div class="meta-item"><span class="meta-label">Open</span><span id="price-open">—</span></div>
+                    <div class="meta-item"><span class="meta-label">High</span><span id="price-high">—</span></div>
+                    <div class="meta-item"><span class="meta-label">Low</span><span id="price-low">—</span></div>
+                    <div class="meta-item"><span class="meta-label">Prev Close</span><span id="price-prev">—</span></div>
+                </div>
+            </div>
+            <div class="card card--regime" id="card-regime">
+                <div class="card__header"><h2>Market Regime</h2></div>
+                <div class="regime-display">
+                    <div class="regime-dial" id="regime-dial">
+                        <span class="regime-dial__label" id="regime-label">—</span>
+                        <span class="regime-dial__confidence" id="regime-confidence">—</span>
+                    </div>
+                    <div class="regime-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Trend Strength</span>
+                            <span class="detail-value" id="trend-strength">—</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Volatility</span>
+                            <span class="detail-value" id="volatility">—</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">ATM Strike</span>
+                            <span class="detail-value" id="atm-strike">—</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">PCR</span>
+                            <span class="detail-value" id="pcr-value">—</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Max Pain</span>
+                            <span class="detail-value" id="max-pain">—</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ─── Row 2: Signal + Chart ─── -->
+        <section class="row row--signal">
+            <div class="card card--signal" id="card-signal">
+                <div class="card__header"><h2>Trading Signal</h2></div>
+                <div class="signal-display">
+                    <div class="signal-badge-large" id="signal-badge">NO_TRADE</div>
+                    <div class="signal-details" id="signal-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Strike</span>
+                            <span class="detail-value" id="signal-strike">—</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Premium</span>
+                            <span class="detail-value" id="signal-premium">—</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Expected Move</span>
+                            <span class="detail-value" id="signal-expected-move">—</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Straddle Cost</span>
+                            <span class="detail-value" id="signal-straddle">—</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">ATM IV</span>
+                            <span class="detail-value" id="signal-iv">—</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">DTE</span>
+                            <span class="detail-value" id="signal-dte">—</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">R/R Ratio</span>
+                            <span class="detail-value" id="signal-rr">—</span>
+                        </div>
+                    </div>
+                    <div class="signal-reasons" id="signal-reasons"></div>
+                    <button class="btn btn--trade" id="btn-paper-trade" style="display:none">
+                        📝 Paper Trade This Signal
+                    </button>
+                </div>
+            </div>
+            <div class="card card--chart">
+                <div class="card__header"><h2>Price Chart</h2></div>
+                <div class="chart-container">
+                    <canvas id="price-chart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- ─── Row 3: Indicators ─── -->
+        <section class="row row--indicators">
+            <div class="card card--indicators-full">
+                <div class="card__header"><h2>Technical Indicators</h2></div>
+                <div class="indicators-grid" id="indicators-grid">
+                    <div class="indicator-card" id="ind-ema20">
+                        <span class="indicator-card__label">EMA 20</span>
+                        <span class="indicator-card__value">—</span>
+                    </div>
+                    <div class="indicator-card" id="ind-ema50">
+                        <span class="indicator-card__label">EMA 50</span>
+                        <span class="indicator-card__value">—</span>
+                    </div>
+                    <div class="indicator-card" id="ind-rsi">
+                        <span class="indicator-card__label">RSI (14)</span>
+                        <span class="indicator-card__value">—</span>
+                    </div>
+                    <div class="indicator-card" id="ind-adx">
+                        <span class="indicator-card__label">ADX (14)</span>
+                        <span class="indicator-card__value">—</span>
+                    </div>
+                    <div class="indicator-card" id="ind-atr">
+                        <span class="indicator-card__label">ATR (14)</span>
+                        <span class="indicator-card__value">—</span>
+                    </div>
+                    <div class="indicator-card" id="ind-bb-upper">
+                        <span class="indicator-card__label">BB Upper</span>
+                        <span class="indicator-card__value">—</span>
+                    </div>
+                    <div class="indicator-card" id="ind-bb-lower">
+                        <span class="indicator-card__label">BB Lower</span>
+                        <span class="indicator-card__value">—</span>
+                    </div>
+                    <div class="indicator-card" id="ind-bb-width">
+                        <span class="indicator-card__label">BB Width</span>
+                        <span class="indicator-card__value">—</span>
+                    </div>
+                    <div class="indicator-card" id="ind-momentum">
+                        <span class="indicator-card__label">Momentum</span>
+                        <span class="indicator-card__value">—</span>
+                    </div>
+                    <div class="indicator-card" id="ind-vwap">
+                        <span class="indicator-card__label">VWAP</span>
+                        <span class="indicator-card__value">—</span>
+                    </div>
+                    <div class="indicator-card" id="ind-ce-oi">
+                        <span class="indicator-card__label">Total CE OI</span>
+                        <span class="indicator-card__value">—</span>
+                    </div>
+                    <div class="indicator-card" id="ind-pe-oi">
+                        <span class="indicator-card__label">Total PE OI</span>
+                        <span class="indicator-card__value">—</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ─── Row 4: Regime Factors ─── -->
+        <section class="row row--factors">
+            <div class="card card--factors">
+                <div class="card__header"><h2>Supporting Factors</h2></div>
+                <ul class="factor-list" id="supporting-factors"></ul>
+            </div>
+            <div class="card card--factors card--factors-opposing">
+                <div class="card__header"><h2>Opposing Factors</h2></div>
+                <ul class="factor-list" id="opposing-factors"></ul>
+            </div>
+        </section>
+
+        <!-- ─── Row 5: Option Chain ─── -->
+        <section class="row row--chain">
+            <div class="card card--chain-full">
+                <div class="card__header">
+                    <h2>Option Chain</h2>
+                    <div class="chain-meta">
+                        <span id="chain-expiry">—</span>
+                        <span id="chain-underlying">—</span>
+                    </div>
+                </div>
+                <div class="table-wrapper">
+                    <table class="chain-table" id="chain-table">
+                        <thead>
+                            <tr>
+                                <th colspan="6" class="chain-header chain-header--ce">CALLS (CE)</th>
+                                <th class="chain-header chain-header--strike">Strike</th>
+                                <th colspan="6" class="chain-header chain-header--pe">PUTS (PE)</th>
+                            </tr>
+                            <tr>
+                                <th>OI</th><th>Chg OI</th><th>Volume</th><th>IV</th><th>LTP</th><th>Bid</th>
+                                <th class="strike-col">Price</th>
+                                <th>Bid</th><th>LTP</th><th>IV</th><th>Volume</th><th>Chg OI</th><th>OI</th>
+                            </tr>
+                        </thead>
+                        <tbody id="chain-tbody">
+                            <tr><td colspan="13" class="empty-row">Loading option chain…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ─── Row 6: OI Chart ─── -->
+        <section class="row row--oi-chart">
+            <div class="card card--oi-chart">
+                <div class="card__header"><h2>Open Interest Distribution</h2></div>
+                <div class="chart-container chart-container--oi">
+                    <canvas id="oi-chart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- ─── Row 7: Paper Trading ─── -->
+        <section class="row row--trading">
+            <div class="card card--portfolio">
+                <div class="card__header">
+                    <h2>📝 Paper Trading</h2>
+                    <div class="trading-controls">
+                        <button class="btn btn--small btn--danger" id="btn-reset-trades">Reset</button>
+                    </div>
+                </div>
+                <div class="portfolio-summary" id="portfolio-summary">
+                    <div class="portfolio-stat">
+                        <span class="portfolio-stat__label">Capital</span>
+                        <span class="portfolio-stat__value" id="port-capital">₹10,00,000</span>
+                    </div>
+                    <div class="portfolio-stat">
+                        <span class="portfolio-stat__label">Open P&L</span>
+                        <span class="portfolio-stat__value" id="port-open-pnl">₹0</span>
+                    </div>
+                    <div class="portfolio-stat">
+                        <span class="portfolio-stat__label">Total P&L</span>
+                        <span class="portfolio-stat__value" id="port-total-pnl">₹0</span>
+                    </div>
+                    <div class="portfolio-stat">
+                        <span class="portfolio-stat__label">Win Rate</span>
+                        <span class="portfolio-stat__value" id="port-win-rate">—</span>
+                    </div>
+                </div>
+                <div class="trades-section">
+                    <h3>Open Positions</h3>
+                    <div class="trades-list" id="open-trades"></div>
+                    <h3>Trade History</h3>
+                    <div class="trades-list" id="closed-trades"></div>
+                </div>
+            </div>
+        </section>
+        <section class="row row--backtest">
+            <div class="card card--backtest">
+                <div class="card__header"><div><span class="eyebrow">RESEARCH LAB</span><h2>Historical Backtest</h2></div><button class="btn btn--small btn--accent" id="btn-backtest">Run Backtest</button></div>
+                <div class="backtest-banner" id="backtest-status">Isolated from live and paper trading. Runs only on genuine historical option-chain data configured on the server.</div>
+                <div class="backtest-metrics" id="backtest-metrics"><div class="metric-tile"><span>Trades</span><strong>—</strong></div><div class="metric-tile"><span>Win rate</span><strong>—</strong></div><div class="metric-tile"><span>P&amp;L</span><strong>—</strong></div><div class="metric-tile"><span>Profit factor</span><strong>—</strong></div><div class="metric-tile"><span>Expectancy</span><strong>—</strong></div><div class="metric-tile"><span>Max drawdown</span><strong>—</strong></div></div>
+                <div class="backtest-grid"><div><h3>Regime performance</h3><div class="table-wrapper"><table class="mini-table"><thead><tr><th>Regime</th><th>Trades</th><th>Win rate</th><th>P&amp;L</th></tr></thead><tbody id="backtest-regimes"><tr><td colspan="4">Run a backtest to see results.</td></tr></tbody></table></div></div><div class="backtest-note"><span class="eyebrow">DATA INTEGRITY</span><p>No synthetic prices, no live-data substitution, and no future rows are used to make an entry decision.</p></div></div>
+            </div>
+        </section>
+    </main>
+
+    <!-- ═══ FOOTER ═══ -->
+    <footer class="footer">
+        <span>⚠ PAPER TRADING ONLY — No real orders are placed</span>
+        <span>Data: NSE India (Public API)</span>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

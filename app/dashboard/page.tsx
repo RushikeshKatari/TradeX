@@ -7,7 +7,11 @@ import { getMarketDataProvider } from '@/lib/market-data';
 import { getPortfolioSummary } from '@/lib/trading/execution';
 import { formatINR } from '@/lib/utils';
 import Link from 'next/link';
-import { ArrowUpRight, ArrowDownRight, TrendingUp, Layers, Briefcase, Bookmark, ShieldCheck, Activity } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, TrendingUp, Layers, Briefcase, Bookmark, ShieldCheck, Activity, Compass, BarChart3 } from 'lucide-react';
+import { RegimeCard } from '@/components/analysis/regime-card';
+import { OptionsSignalCard } from '@/components/options/options-signal-card';
+import { detectMarketRegime } from '@/lib/analysis/regime-engine';
+import { analyzeOptionsSignal } from '@/lib/options/options-signal-engine';
 
 export default async function DashboardPage() {
   const user = await getSessionUser();
@@ -17,23 +21,52 @@ export default async function DashboardPage() {
   const marketStatus = await provider.getMarketStatus();
 
   // Load key index quotes safely
-  const [niftyQuote, sensexQuote, bankQuote] = await Promise.all([
+  const [niftyQuote, sensexQuote, bankQuote, niftyCandles, niftyChain] = await Promise.all([
     provider.getQuote('NIFTY50').catch(() => null),
     provider.getQuote('SENSEX').catch(() => null),
     provider.getQuote('BANKNIFTY').catch(() => null),
+    provider.getHistoricalCandles('NIFTY50', '1D', '3mo').catch(() => []),
+    provider.getOptionChain('NIFTY50').catch(() => null),
   ]);
+
+  const pcr = niftyChain?.pcr?.oiPcr ?? niftyChain?.pcr?.volumePcr ?? 1.0;
+  const spot = niftyQuote?.lastPrice || niftyChain?.underlyingPrice || 0;
+  const atmStrike = spot > 0 ? Math.round(spot / 50) * 50 : undefined;
+  const maxPain = niftyChain?.highestVolumeStrikeCE?.strike ?? niftyChain?.highestVolumeStrikePE?.strike;
+  const niftyRegime = detectMarketRegime(niftyCandles, pcr, atmStrike, maxPain);
+  const niftySignal = analyzeOptionsSignal(niftyRegime, niftyChain, niftyQuote?.lastPrice);
 
   // Load portfolio summary
   const portfolio = await getPortfolioSummary(user.userId).catch(() => null);
 
-  const popularStocks = [
-    { symbol: 'RELIANCE', name: 'Reliance Industries', price: 2945.80, change: '+0.85%' },
-    { symbol: 'TCS', name: 'Tata Consultancy Services', price: 4190.20, change: '+1.12%' },
-    { symbol: 'INFY', name: 'Infosys Ltd.', price: 1885.60, change: '-0.45%' },
-    { symbol: 'HDFCBANK', name: 'HDFC Bank Ltd.', price: 1665.40, change: '+0.60%' },
-    { symbol: 'ICICIBANK', name: 'ICICI Bank Ltd.', price: 1240.15, change: '+1.35%' },
-    { symbol: 'SBIN', name: 'State Bank of India', price: 795.30, change: '-0.20%' },
+  const popularStockDefinitions = [
+    { symbol: 'RELIANCE', name: 'Reliance Industries', fallbackPrice: 1207.7 },
+    { symbol: 'TCS', name: 'Tata Consultancy Services', fallbackPrice: 2076.2 },
+    { symbol: 'INFY', name: 'Infosys Ltd.', fallbackPrice: 1000.8 },
+    { symbol: 'HDFCBANK', name: 'HDFC Bank Ltd.', fallbackPrice: 722.0 },
+    { symbol: 'ICICIBANK', name: 'ICICI Bank Ltd.', fallbackPrice: 1240.15 },
+    { symbol: 'SBIN', name: 'State Bank of India', fallbackPrice: 795.3 },
   ];
+
+  const popularStocks = await Promise.all(
+    popularStockDefinitions.map(async (st) => {
+      const q = await provider.getQuote(st.symbol).catch(() => null);
+      if (q) {
+        return {
+          symbol: st.symbol,
+          name: st.name,
+          price: q.lastPrice,
+          change: `${q.change >= 0 ? '+' : ''}${q.changePercent.toFixed(2)}%`,
+        };
+      }
+      return {
+        symbol: st.symbol,
+        name: st.name,
+        price: st.fallbackPrice,
+        change: '+0.00%',
+      };
+    })
+  );
 
   return (
     <div className="min-h-screen bg-[#090d16] flex flex-col">
@@ -102,6 +135,37 @@ export default async function DashboardPage() {
                 </Link>
               );
             })}
+          </div>
+
+          {/* Market Regime & Options Strategy Intelligence Section */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Compass className="w-4 h-4 text-indigo-400" />
+                <h2 className="text-sm font-bold text-white uppercase tracking-wider">
+                  Live Market Regime &amp; Options Signal
+                </h2>
+              </div>
+              <div className="flex items-center gap-3">
+                <Link
+                  href="/regime"
+                  className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                >
+                  Full Regime Radar →
+                </Link>
+                <Link
+                  href="/backtest"
+                  className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
+                >
+                  Backtest Terminal →
+                </Link>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <RegimeCard regime={niftyRegime} symbol="NIFTY50" />
+              <OptionsSignalCard signal={niftySignal} symbol="NIFTY50" />
+            </div>
           </div>
 
           {/* Portfolio & Virtual Capital Card */}
