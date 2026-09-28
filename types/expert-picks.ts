@@ -17,6 +17,12 @@ export interface ExpertPickCandidate {
   requiredInvestment: number;
   totalExposure: number;
   signalReasons: string[];
+  ceInvestment?: number;
+  peInvestment?: number;
+  ceStopLossPercent?: number;
+  peStopLossPercent?: number;
+  targetValue?: number;
+  pairedOptionTypes?: ('CE' | 'PE')[];
 }
 
 export interface ExpertPickPosition {
@@ -38,6 +44,9 @@ export interface ExpertPickPosition {
   status: 'OPEN' | 'CLOSED';
   exitReason?: string;
   enteredAt: string;
+  stopLossPercent?: number;
+  exitTargetValue?: number;
+  tradeGroupId?: string;
   exitedAt?: string;
 }
 

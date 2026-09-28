@@ -3,6 +3,9 @@ import { getSessionUser } from '@/lib/auth/session';
 import { executePaperOrder, ExecutionError } from '@/lib/trading/execution';
 import { OrderInput } from '@/types/trading';
 import { getConfiguredExitTime, shouldTimeExit } from '@/lib/expert-picks/exit-service';
+import { prisma } from '@/lib/db/prisma';
+import { getMarketDataProvider } from '@/lib/market-data';
+import { randomUUID } from 'crypto';
 
 export async function POST(request: NextRequest) {
   try {
@@ -20,7 +23,40 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { underlying, strike, optionType, expiry, quantity, price } = body;
+    const { underlying, strike, optionType, expiry, quantity, price, ceInvestment, peInvestment, ceStopLossPercent, peStopLossPercent, targetValue } = body;
+
+    // Paired CE+PE entry. Investments are converted to whole lots using live LTPs.
+    if (ceInvestment !== undefined || peInvestment !== undefined) {
+      const ceBudget = Number(ceInvestment || 0);
+      const peBudget = Number(peInvestment || 0);
+      const provider = getMarketDataProvider();
+      const lotSize = 75;
+      const groupId = randomUUID();
+      const legs = [
+        { optionType: 'CE' as const, budget: ceBudget, stop: Number(ceStopLossPercent || 0) },
+        { optionType: 'PE' as const, budget: peBudget, stop: Number(peStopLossPercent || 0) },
+      ];
+      if (ceBudget <= 0 || peBudget <= 0 || Number(targetValue) <= 0) {
+        return NextResponse.json({ error: 'CE investment, PE investment, and exit target must be greater than zero.' }, { status: 400 });
+      }
+      const results = [];
+      for (const leg of legs) {
+        const quote = await provider.getQuote(`${underlying}_${strike}_${leg.optionType}`);
+        const lots = Math.floor(leg.budget / (quote.lastPrice * lotSize));
+        if (lots < 1) return NextResponse.json({ error: `${leg.optionType} investment must cover at least one lot.` }, { status: 400 });
+        const result = await executePaperOrder(user.userId, {
+          symbol: `${underlying}_${strike}_${leg.optionType}`,
+          instrumentType: 'OPTION', side: 'BUY', orderType: 'MARKET',
+          quantity: lots * lotSize, price: quote.lastPrice,
+        });
+        await prisma.position.update({
+          where: { userId_symbol: { userId: user.userId, symbol: `${underlying}_${strike}_${leg.optionType}` } },
+          data: { stopLossPercent: leg.stop, exitTargetValue: Number(targetValue), tradeGroupId: groupId },
+        });
+        results.push({ optionType: leg.optionType, lots, ...result });
+      }
+      return NextResponse.json({ success: true, paired: true, groupId, results });
+    }
 
     if (!underlying || !strike || !optionType || !quantity || quantity <= 0) {
       return NextResponse.json({ error: 'Invalid order parameters. Quantity must be at least 1.' }, { status: 400 });
