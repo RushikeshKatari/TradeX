@@ -12,6 +12,16 @@ export class ExecutionError extends Error {
   }
 }
 
+type PairedOptionLegInput = {
+  symbol: string;
+  exchange?: string;
+  quantity: number;
+  price: number;
+  stopLossPercent: number;
+  exitTargetValue: number;
+  tradeGroupId: string;
+};
+
 export async function executePaperOrder(userId: string, input: OrderInput) {
   const provider = getMarketDataProvider();
   const symbol = input.symbol.toUpperCase().trim();
@@ -282,8 +292,17 @@ export async function executePaperOrder(userId: string, input: OrderInput) {
       const accRealized = toDecimal(position.realizedPnL).plus(realizedPnL);
 
       if (remainingQty === 0) {
-        await tx.position.delete({
+        // Keep the zero-quantity row as the realized-P&L accumulator. This
+        // lets portfolio totals continue to include fully closed positions.
+        await tx.position.update({
           where: { id: position.id },
+          data: {
+            quantity: 0,
+            realizedPnL: accRealized,
+            stopLossPercent: null,
+            exitTargetValue: null,
+            tradeGroupId: null,
+          },
         });
       } else {
         await tx.position.update({
@@ -329,6 +348,189 @@ export async function executePaperOrder(userId: string, input: OrderInput) {
       };
     }
   });
+}
+
+/**
+ * Enter both legs of an Expert Picks CE+PE strategy as one database transaction.
+ * Quotes are resolved before this function is called, so any quote/lot failure
+ * happens before either leg changes the user's cash or positions.
+ */
+export async function executePairedOptionBuys(userId: string, legs: PairedOptionLegInput[]) {
+  if (legs.length !== 2) {
+    throw new ExecutionError('A paired option trade must contain both CE and PE legs.');
+  }
+
+  const normalizedLegs = legs.map((leg) => {
+    const symbol = leg.symbol.toUpperCase().trim();
+    const quantity = Math.floor(leg.quantity);
+    if (!symbol || quantity <= 0 || !Number.isFinite(leg.price) || leg.price <= 0) {
+      throw new ExecutionError('Both option legs must have a valid symbol, price, and quantity.');
+    }
+    return { ...leg, symbol, quantity };
+  });
+
+  if (normalizedLegs[0].symbol === normalizedLegs[1].symbol) {
+    throw new ExecutionError('The CE and PE legs must use different option symbols.');
+  }
+
+  const totalRequired = normalizedLegs.reduce(
+    (sum, leg) => sum.plus(toDecimal(leg.price).times(leg.quantity)),
+    new Decimal(0),
+  );
+
+  const results = await prisma.$transaction(async (tx) => {
+    const account = await tx.virtualAccount.findUnique({ where: { userId } });
+    if (!account) throw new ExecutionError('Virtual trading account not found.');
+
+    let currentBalance = toDecimal(account.balance);
+    if (currentBalance.lessThan(totalRequired)) {
+      throw new ExecutionError(
+        `Insufficient virtual cash balance for both option legs. Required: ₹${roundMoney(totalRequired)}, Available: ₹${roundMoney(currentBalance)}.`,
+      );
+    }
+
+    const filledLegs = [];
+    for (const leg of normalizedLegs) {
+      const decPrice = toDecimal(leg.price);
+      const totalValue = decPrice.times(leg.quantity);
+      const newBalance = currentBalance.minus(totalValue);
+
+      await tx.virtualAccount.update({
+        where: { id: account.id },
+        data: { balance: newBalance },
+      });
+
+      await tx.fundTransaction.create({
+        data: {
+          virtualAccountId: account.id,
+          userId,
+          type: 'TRADE_BUY',
+          amount: totalValue,
+          balanceBefore: currentBalance,
+          balanceAfter: newBalance,
+          reason: `Paper Buy: ${leg.quantity} contracts of ${leg.symbol} @ ₹${leg.price}`,
+          createdBy: 'TRADING_ENGINE',
+        },
+      });
+
+      const order = await tx.order.create({
+        data: {
+          userId,
+          symbol: leg.symbol,
+          exchange: leg.exchange || 'NSE',
+          instrumentType: 'OPTION',
+          side: 'BUY',
+          orderType: 'MARKET',
+          quantity: leg.quantity,
+          requestedPrice: decPrice,
+          executedPrice: decPrice,
+          status: 'FILLED',
+          executedAt: new Date(),
+        },
+      });
+
+      const trade = await tx.trade.create({
+        data: {
+          orderId: order.id,
+          userId,
+          symbol: leg.symbol,
+          side: 'BUY',
+          quantity: leg.quantity,
+          price: decPrice,
+          value: totalValue,
+        },
+      });
+
+      const existingPosition = await tx.position.findUnique({
+        where: { userId_symbol: { userId, symbol: leg.symbol } },
+      });
+      if (existingPosition) {
+        const newQuantity = existingPosition.quantity + leg.quantity;
+        const newAverage = calcAveragePrice(
+          existingPosition.quantity,
+          existingPosition.averageEntryPrice,
+          leg.quantity,
+          decPrice,
+        );
+        await tx.position.update({
+          where: { id: existingPosition.id },
+          data: {
+            quantity: newQuantity,
+            averageEntryPrice: newAverage,
+            stopLossPercent: toDecimal(leg.stopLossPercent),
+            exitTargetValue: toDecimal(leg.exitTargetValue),
+            tradeGroupId: leg.tradeGroupId,
+          },
+        });
+      } else {
+        await tx.position.create({
+          data: {
+            userId,
+            symbol: leg.symbol,
+            exchange: leg.exchange || 'NSE',
+            quantity: leg.quantity,
+            averageEntryPrice: decPrice,
+            stopLossPercent: toDecimal(leg.stopLossPercent),
+            exitTargetValue: toDecimal(leg.exitTargetValue),
+            tradeGroupId: leg.tradeGroupId,
+          },
+        });
+      }
+
+      const existingHolding = await tx.holding.findUnique({
+        where: { userId_symbol: { userId, symbol: leg.symbol } },
+      });
+      if (existingHolding) {
+        const newQuantity = existingHolding.quantity + leg.quantity;
+        const newAverage = calcAveragePrice(
+          existingHolding.quantity,
+          existingHolding.averagePrice,
+          leg.quantity,
+          decPrice,
+        );
+        await tx.holding.update({
+          where: { id: existingHolding.id },
+          data: { quantity: newQuantity, averagePrice: newAverage },
+        });
+      } else {
+        await tx.holding.create({
+          data: {
+            userId,
+            symbol: leg.symbol,
+            quantity: leg.quantity,
+            averagePrice: decPrice,
+          },
+        });
+      }
+
+      filledLegs.push({
+        order,
+        trade,
+        executedPrice: leg.price,
+        quantity: leg.quantity,
+        totalValue: roundMoney(totalValue),
+      });
+      currentBalance = newBalance;
+    }
+
+    return filledLegs;
+  });
+
+  await Promise.all(results.map((result) => logAudit({
+    userId,
+    action: 'ORDER_FILLED',
+    entity: 'ORDER',
+    entityId: result.order.id,
+    details: {
+      symbol: result.order.symbol,
+      side: 'BUY',
+      quantity: result.quantity,
+      price: result.executedPrice,
+      tradeGroupId: normalizedLegs[0].tradeGroupId,
+    },
+  })));
+
+  return results;
 }
 
 async function reserveAndCreateOpenLimitOrder(userId: string, input: OrderInput, limitPrice: number) {
@@ -441,18 +643,28 @@ export async function getPortfolioSummary(userId: string): Promise<{
 }> {
   const provider = getMarketDataProvider();
 
-  // Get virtual account
-  const account = await prisma.virtualAccount.findUnique({
-    where: { userId },
-  });
+  // These reads do not depend on one another.
+  const [account, rawPositions, rawHoldings] = await Promise.all([
+    prisma.virtualAccount.findUnique({ where: { userId } }),
+    prisma.position.findMany({ where: { userId } }),
+    prisma.holding.findMany({ where: { userId } }),
+  ]);
 
   const cashBalance = account ? roundMoney(toDecimal(account.balance)) : 0;
   const reservedBalance = account ? roundMoney(toDecimal(account.reservedBalance)) : 0;
 
-  // Get positions
-  const rawPositions = await prisma.position.findMany({
-    where: { userId },
-  });
+  // Fetch unique prices concurrently. Previously each position and holding
+  // awaited its own quote serially, making portfolio response time grow with
+  // every open instrument.
+  const symbols = [...new Set([
+    ...rawPositions.filter((position) => position.quantity > 0).map((position) => position.symbol),
+    ...rawHoldings.map((holding) => holding.symbol),
+  ])];
+  const quoteEntries = await Promise.all(symbols.map(async (symbol) => {
+    const quote = await provider.getQuote(symbol).catch(() => null);
+    return [symbol, quote?.lastPrice ?? null] as const;
+  }));
+  const quotePrices = new Map(quoteEntries);
 
   let totalInvested = new Decimal(0);
   let totalCurrentValue = new Decimal(0);
@@ -463,8 +675,11 @@ export async function getPortfolioSummary(userId: string): Promise<{
   const optionLotSizes: Record<string, number> = { NIFTY50: 75, BANKNIFTY: 30, SENSEX: 20, NIFTYIT: 25 };
 
   for (const pos of rawPositions) {
-    const quote = await provider.getQuote(pos.symbol).catch(() => null);
-    const currentPrice = quote ? quote.lastPrice : Number(pos.averageEntryPrice);
+    const realPnl = toDecimal(pos.realizedPnL);
+    totalRealizedPnL = totalRealizedPnL.plus(realPnl);
+    if (pos.quantity <= 0) continue;
+
+    const currentPrice = quotePrices.get(pos.symbol) ?? Number(pos.averageEntryPrice);
 
     const qty = new Decimal(pos.quantity);
     const avg = toDecimal(pos.averageEntryPrice);
@@ -474,12 +689,9 @@ export async function getPortfolioSummary(userId: string): Promise<{
     const curVal = qty.times(cur);
     const unPnl = curVal.minus(invested);
     const unPnlPct = invested.isZero() ? 0 : unPnl.dividedBy(invested).times(100).toNumber();
-    const realPnl = toDecimal(pos.realizedPnL);
-
     totalInvested = totalInvested.plus(invested);
     totalCurrentValue = totalCurrentValue.plus(curVal);
     totalUnrealizedPnL = totalUnrealizedPnL.plus(unPnl);
-    totalRealizedPnL = totalRealizedPnL.plus(realPnl);
 
     const optionMatch = pos.symbol.match(/^([A-Z0-9]+)_(\d+(?:\.\d+)?)_(CE|PE)$/);
     const optionMetadata = optionMatch ? {
@@ -506,15 +718,9 @@ export async function getPortfolioSummary(userId: string): Promise<{
     });
   }
 
-  // Holdings
-  const rawHoldings = await prisma.holding.findMany({
-    where: { userId },
-  });
-
   const holdings: HoldingView[] = [];
   for (const h of rawHoldings) {
-    const quote = await provider.getQuote(h.symbol).catch(() => null);
-    const currentPrice = quote ? quote.lastPrice : Number(h.averagePrice);
+    const currentPrice = quotePrices.get(h.symbol) ?? Number(h.averagePrice);
 
     const qty = new Decimal(h.quantity);
     const avg = toDecimal(h.averagePrice);
@@ -618,4 +824,124 @@ export async function allocateAdminFunds(params: {
 
     return txRecord;
   });
+}
+
+export async function resetAdminBalance(params: {
+  targetUserId: string;
+  adminUserId: string;
+  targetBalance: number;
+  reason: string;
+}) {
+  const targetBalance = toDecimal(params.targetBalance);
+  if (!targetBalance.isFinite() || targetBalance.isNegative()) {
+    throw new ExecutionError('The reset balance must be a valid non-negative amount.');
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const targetUser = await tx.user.findUnique({
+      where: { id: params.targetUserId },
+      select: { id: true, username: true },
+    });
+    if (!targetUser) throw new ExecutionError('User not found.');
+
+    let account = await tx.virtualAccount.findUnique({ where: { userId: params.targetUserId } });
+    if (!account) {
+      account = await tx.virtualAccount.create({
+        data: { userId: params.targetUserId, balance: new Decimal(0) },
+      });
+    }
+
+    const balanceBefore = toDecimal(account.balance);
+    const reservedBalance = toDecimal(account.reservedBalance);
+    if (targetBalance.lessThan(reservedBalance)) {
+      throw new ExecutionError(
+        `The balance cannot be lower than ₹${roundMoney(reservedBalance)} because open buy orders have reserved funds.`,
+      );
+    }
+    const difference = targetBalance.minus(balanceBefore);
+    if (difference.isZero()) {
+      throw new ExecutionError('The account already has the requested balance.');
+    }
+
+    await tx.virtualAccount.update({
+      where: { id: account.id },
+      data: { balance: targetBalance },
+    });
+    const transaction = await tx.fundTransaction.create({
+      data: {
+        virtualAccountId: account.id,
+        userId: params.targetUserId,
+        type: difference.isPositive() ? 'ADMIN_CREDIT' : 'ADMIN_DEBIT',
+        amount: difference.abs(),
+        balanceBefore,
+        balanceAfter: targetBalance,
+        reason: `Admin reset by ${params.adminUserId}: ${params.reason}`,
+        createdBy: params.adminUserId,
+      },
+    });
+
+    return {
+      transaction,
+      balanceBefore: roundMoney(balanceBefore),
+      balanceAfter: roundMoney(targetBalance),
+      username: targetUser.username,
+    };
+  });
+
+  await logAudit({
+    userId: params.adminUserId,
+    action: 'ADMIN_RESET_USER_BALANCE',
+    entity: 'VIRTUAL_ACCOUNT',
+    entityId: result.transaction.virtualAccountId,
+    details: {
+      targetUserId: params.targetUserId,
+      targetUsername: result.username,
+      balanceBefore: result.balanceBefore,
+      balanceAfter: result.balanceAfter,
+      reason: params.reason,
+    },
+  });
+
+  return result;
+}
+
+export async function clearUserOrderHistory(params: {
+  targetUserId: string;
+  actorUserId: string;
+  actorRole: 'ADMIN' | 'USER';
+}) {
+  const result = await prisma.$transaction(async (tx) => {
+    const target = await tx.user.findUnique({
+      where: { id: params.targetUserId },
+      select: { id: true },
+    });
+    if (!target) throw new ExecutionError('User not found.');
+
+    const account = await tx.virtualAccount.findUnique({ where: { userId: params.targetUserId } });
+    const reservedToRelease = account ? toDecimal(account.reservedBalance) : new Decimal(0);
+    if (account && reservedToRelease.isPositive()) {
+      await tx.virtualAccount.update({
+        where: { id: account.id },
+        data: { reservedBalance: new Decimal(0) },
+      });
+    }
+
+    const deletedTrades = await tx.trade.count({ where: { userId: params.targetUserId } });
+    const deletedOrders = await tx.order.deleteMany({ where: { userId: params.targetUserId } });
+    return {
+      deletedOrders: deletedOrders.count,
+      deletedTrades,
+      releasedReservedFunds: roundMoney(reservedToRelease),
+    };
+  });
+
+  await logAudit({
+    userId: params.actorUserId,
+    action: params.actorRole === 'ADMIN' ? 'ADMIN_CLEAR_USER_ORDER_HISTORY' : 'USER_CLEAR_ORDER_HISTORY',
+    entity: 'ORDER_HISTORY',
+    entityId: params.targetUserId,
+    details: result,
+  });
+
+  return result;
 }

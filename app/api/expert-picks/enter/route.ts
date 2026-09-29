@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth/session';
-import { executePaperOrder, ExecutionError } from '@/lib/trading/execution';
+import { executePairedOptionBuys, executePaperOrder, ExecutionError } from '@/lib/trading/execution';
 import { OrderInput } from '@/types/trading';
-import { getConfiguredExitTime, shouldTimeExit } from '@/lib/expert-picks/exit-service';
-import { prisma } from '@/lib/db/prisma';
+import { isExpertPickEntryAllowed } from '@/lib/market-data/calendar';
 import { getMarketDataProvider } from '@/lib/market-data';
 import { randomUUID } from 'crypto';
 
@@ -14,10 +13,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const exitTime = getConfiguredExitTime();
-    if (shouldTimeExit(exitTime)) {
+    if (!isExpertPickEntryAllowed()) {
       return NextResponse.json(
-        { error: `Expert Picks entries are closed after ${exitTime} IST. New positions will be available next trading session.` },
+        { error: 'Expert Picks entries are available from 09:15 AM to 03:45 PM IST on trading days.' },
         { status: 400 }
       );
     }
@@ -29,33 +27,80 @@ export async function POST(request: NextRequest) {
     if (ceInvestment !== undefined || peInvestment !== undefined) {
       const ceBudget = Number(ceInvestment || 0);
       const peBudget = Number(peInvestment || 0);
-      const provider = getMarketDataProvider();
-      const lotSize = 75;
-      const groupId = randomUUID();
-      const legs = [
-        { optionType: 'CE' as const, budget: ceBudget, stop: Number(ceStopLossPercent || 0) },
-        { optionType: 'PE' as const, budget: peBudget, stop: Number(peStopLossPercent || 0) },
-      ];
-      if (ceBudget <= 0 || peBudget <= 0 || Number(targetValue) <= 0) {
+      const stopLosses = [Number(ceStopLossPercent ?? 0), Number(peStopLossPercent ?? 0)];
+      const target = Number(targetValue);
+      const optionUnderlying = String(underlying || '').trim().toUpperCase();
+      const optionStrike = Number(strike);
+      if (
+        !Number.isFinite(ceBudget) || ceBudget <= 0 ||
+        !Number.isFinite(peBudget) || peBudget <= 0 ||
+        !Number.isFinite(target) || target <= 0 ||
+        !Number.isFinite(optionStrike) || optionStrike <= 0 ||
+        !stopLosses.every((stop) => Number.isFinite(stop) && stop >= 0 && stop <= 100)
+      ) {
         return NextResponse.json({ error: 'CE investment, PE investment, and exit target must be greater than zero.' }, { status: 400 });
       }
-      const results = [];
-      for (const leg of legs) {
-        const quote = await provider.getQuote(`${underlying}_${strike}_${leg.optionType}`);
-        const lots = Math.floor(leg.budget / (quote.lastPrice * lotSize));
-        if (lots < 1) return NextResponse.json({ error: `${leg.optionType} investment must cover at least one lot.` }, { status: 400 });
-        const result = await executePaperOrder(user.userId, {
-          symbol: `${underlying}_${strike}_${leg.optionType}`,
-          instrumentType: 'OPTION', side: 'BUY', orderType: 'MARKET',
-          quantity: lots * lotSize, price: quote.lastPrice,
-        });
-        await prisma.position.update({
-          where: { userId_symbol: { userId: user.userId, symbol: `${underlying}_${strike}_${leg.optionType}` } },
-          data: { stopLossPercent: leg.stop, exitTargetValue: Number(targetValue), tradeGroupId: groupId },
-        });
-        results.push({ optionType: leg.optionType, lots, ...result });
+
+      const lotSizeByUnderlying: Record<string, number> = {
+        NIFTY50: 75,
+        BANKNIFTY: 30,
+        SENSEX: 20,
+        NIFTYIT: 25,
+      };
+      const lotSize = lotSizeByUnderlying[optionUnderlying];
+      if (!lotSize) {
+        return NextResponse.json({ error: 'Unsupported option underlying for a paired trade.' }, { status: 400 });
       }
-      return NextResponse.json({ success: true, paired: true, groupId, results });
+
+      const groupId = randomUUID();
+      const provider = getMarketDataProvider();
+      const requestedLegs = [
+        { optionType: 'CE' as const, budget: ceBudget, stopLossPercent: stopLosses[0] },
+        { optionType: 'PE' as const, budget: peBudget, stopLossPercent: stopLosses[1] },
+      ];
+      const preparedLegs = await Promise.all(requestedLegs.map(async (leg) => {
+        const symbol = `${optionUnderlying}_${optionStrike}_${leg.optionType}`;
+        const quote = await provider.getQuote(symbol);
+        if (!Number.isFinite(quote.lastPrice) || quote.lastPrice <= 0) {
+          throw new ExecutionError(`A valid ${leg.optionType} quote is unavailable; neither side was entered.`);
+        }
+        const lots = Math.floor(leg.budget / (quote.lastPrice * lotSize));
+        if (lots < 1) {
+          throw new ExecutionError(`${leg.optionType} investment must cover at least one lot; neither side was entered.`);
+        }
+        return {
+          ...leg,
+          symbol,
+          lots,
+          quantity: lots * lotSize,
+          price: quote.lastPrice,
+          exchange: optionUnderlying === 'SENSEX' ? 'BSE' : 'NSE',
+        };
+      }));
+
+      const results = await executePairedOptionBuys(
+        user.userId,
+        preparedLegs.map((leg) => ({
+          symbol: leg.symbol,
+          exchange: leg.exchange,
+          quantity: leg.quantity,
+          price: leg.price,
+          stopLossPercent: leg.stopLossPercent,
+          exitTargetValue: target,
+          tradeGroupId: groupId,
+        })),
+      );
+
+      return NextResponse.json({
+        success: true,
+        paired: true,
+        groupId,
+        results: results.map((result, index) => ({
+          optionType: preparedLegs[index].optionType,
+          lots: preparedLegs[index].lots,
+          ...result,
+        })),
+      });
     }
 
     if (!underlying || !strike || !optionType || !quantity || quantity <= 0) {

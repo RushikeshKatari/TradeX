@@ -11,6 +11,10 @@ export interface BacktestConfig {
   slippagePerUnit: number;
   costPerTrade: number;
   strategy: BacktestStrategyType;
+  entryTime?: string;
+  exitTime?: string;
+  strikeCount?: number;
+  initialPerSideInvestment?: number;
 }
 
 export interface BacktestTrade {
@@ -58,4 +62,33 @@ export interface BacktestResult {
   equityCurve: { date: string; equity: number }[];
   regimePerformance: RegimePerformance[];
   signalCounts: Record<string, number>;
+  dailyResults?: BacktestDailyResult[];
+  strikeResults?: BacktestStrikeResult[];
+  reinvestment?: {
+    reinvestmentRate: number;
+    initialPerSideInvestment: number;
+    finalPerSideInvestment: number;
+    totalReinvested: number;
+  };
+}
+
+export interface BacktestDailyResult {
+  date: string;
+  pnl: number;
+  cePnl: number;
+  pePnl: number;
+  strikesEntered: number[];
+  capital: number;
+  reinvested: number;
+  investmentPerSideNextDay: number;
+}
+
+export interface BacktestStrikeResult {
+  strike: number;
+  side: 'ABOVE' | 'BELOW' | 'BOTH';
+  days: number;
+  cePnl: number;
+  pePnl: number;
+  totalPnl: number;
+  dailyPnl: { date: string; pnl: number }[];
 }

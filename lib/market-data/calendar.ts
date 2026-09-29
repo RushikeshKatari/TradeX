@@ -81,3 +81,24 @@ export function getIndianMarketStatus(customDate?: Date): MarketStatus {
     timestamp: now.toISOString(),
   };
 }
+
+export function isIndianTradingDay(customDate?: Date): boolean {
+  const now = customDate || new Date();
+  const date = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const day = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(now);
+  return day !== 'Sat' && day !== 'Sun' && !NSE_HOLIDAYS_YYYY_MM_DD.has(date);
+}
+
+/** Expert Picks accepts paper entries through the 3:45 PM forced-exit time. */
+export function isExpertPickEntryAllowed(customDate?: Date): boolean {
+  const now = customDate || new Date();
+  if (getIndianMarketStatus(now).isOpen) return true;
+  if (!isIndianTradingDay(now)) return false;
+
+  const time = now.toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour12: false });
+  const [hours, minutes] = time.split(':').map(Number);
+  const currentMinutes = hours * 60 + minutes;
+  const lateEntryStartMinutes = 15 * 60 + 15;
+  const forcedExitMinutes = 15 * 60 + 45;
+  return currentMinutes >= lateEntryStartMinutes && currentMinutes < forcedExitMinutes;
+}

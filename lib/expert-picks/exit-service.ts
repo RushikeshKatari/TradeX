@@ -1,10 +1,13 @@
 import { ExpertPickPosition } from '@/types/expert-picks';
 import { executePaperOrder } from '@/lib/trading/execution';
 import { OrderInput } from '@/types/trading';
+import { prisma } from '@/lib/db/prisma';
+import { getMarketDataProvider } from '@/lib/market-data';
+import { getIndianMarketStatus, isIndianTradingDay } from '@/lib/market-data/calendar';
 
-// Configurable exit time (IST, 24h format - e.g. "15:15")
+// Configurable exit time (IST, 24h format - e.g. "15:45")
 export function getConfiguredExitTime(): string {
-  return process.env.EXPERT_PICKS_EXIT_TIME_IST || '15:15';
+  return process.env.EXPERT_PICKS_EXIT_TIME_IST || '15:45';
 }
 
 export const EXIT_TIME_IST = getConfiguredExitTime();
@@ -12,15 +15,11 @@ export const EXIT_TIME_IST = getConfiguredExitTime();
 export type ExitReason =
   | 'STOP_LOSS_50PCT'
   | 'COMBINED_PROFIT_EXIT'
-  | 'TIME_EXIT_3_15PM'
+  | 'TIME_EXIT_3_45PM'
   | 'MANUAL_EXIT';
 
 export function isWithinTradingWindowIst(customDate?: Date): boolean {
-  const now = customDate || new Date();
-  const time = now.toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour12: false });
-  const [hours, minutes] = time.split(':').map(Number);
-  const currentMinutes = hours * 60 + minutes;
-  return currentMinutes >= 9 * 60 + 15 && currentMinutes < 15 * 60 + 15;
+  return getIndianMarketStatus(customDate).isOpen;
 }
 
 export function shouldStopLossExit(entryPrice: number, currentLtp: number, side: 'BUY' | 'SELL', customDate?: Date): boolean {
@@ -54,6 +53,8 @@ export function shouldCombinedProfitExit(
 
 export function shouldTimeExit(exitTimeIst: string = getConfiguredExitTime(), customDate?: Date): boolean {
   const now = customDate || new Date();
+  if (!isIndianTradingDay(now)) return false;
+
   const kolkataTime = now.toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour12: false });
   const [h, m] = kolkataTime.split(':').map(Number);
   const [exitH, exitM] = exitTimeIst.split(':').map(Number);
@@ -81,7 +82,7 @@ export async function evaluateAndExecuteAutoExits(
   const exitTime = getConfiguredExitTime();
   const isTimeExit = shouldTimeExit(exitTime);
 
-  // 1. Time Exit Check (3:15 PM IST)
+  // 1. Time Exit Check (3:45 PM IST)
   if (isTimeExit) {
     for (const pos of openPositions) {
       try {
@@ -99,8 +100,8 @@ export async function evaluateAndExecuteAutoExits(
           positionId: pos.id,
           symbol,
           quantity: pos.quantity,
-          reason: 'TIME_EXIT_3_15PM',
-          message: `Auto-closed at ${exitTime} IST market close.`,
+          reason: 'TIME_EXIT_3_45PM',
+          message: `Auto-closed at ${exitTime} IST.`,
         });
         pos.status = 'CLOSED';
         pos.exitReason = `Time Exit (${exitTime} IST)`;
@@ -166,7 +167,9 @@ export async function evaluateAndExecuteAutoExits(
       const ceVal = group.ce.reduce((sum, p) => sum + p.currentValue, 0);
       const peVal = group.pe.reduce((sum, p) => sum + p.currentValue, 0);
 
-      const target = [...group.ce, ...group.pe].map((p) => p.exitTargetValue || 0).find((v) => v > 0) || 0;
+      const target = [...group.ce, ...group.pe]
+        .map((p) => p.exitTargetValue || 0)
+        .find((value) => value > 0) || 0;
       const combinedCurrentValue = ceVal + peVal;
       if (target > 0 ? combinedCurrentValue >= target : shouldCombinedProfitExit(ceInv, peInv, ceVal, peVal)) {
         const allInGroup = [...group.ce, ...group.pe];
@@ -200,4 +203,80 @@ export async function evaluateAndExecuteAutoExits(
   }
 
   return results;
+}
+
+/**
+ * Poll and close open option positions for every user from the long-running
+ * Next.js server. The page API also evaluates exits, so either path can close
+ * a position; the trading transaction prevents a duplicate sale.
+ */
+export async function runScheduledExpertPickAutoExits(): Promise<void> {
+  const dbPositions = await prisma.position.findMany({
+    where: { quantity: { gt: 0 } },
+    orderBy: { updatedAt: 'asc' },
+  });
+  const optionPositions = dbPositions.filter((position) =>
+    /^([A-Z0-9]+)_(\d+(?:\.\d+)?)_(CE|PE)$/.test(position.symbol),
+  );
+  if (optionPositions.length === 0) return;
+
+  const provider = getMarketDataProvider();
+  const groupedByUser = new Map<string, ExpertPickPosition[]>();
+  const positions = await Promise.all(optionPositions.map(async (position) => {
+    const match = position.symbol.match(/^([A-Z0-9]+)_(\d+(?:\.\d+)?)_(CE|PE)$/)!;
+    const [, underlying, strikeText, optionTypeText] = match;
+    let currentLtp = Number(position.averageEntryPrice);
+    try {
+      const quote = await provider.getQuote(position.symbol);
+      if (quote.lastPrice > 0) currentLtp = quote.lastPrice;
+    } catch {
+      // Use average entry as a safe fallback if the quote provider is unavailable.
+    }
+
+    const entryPrice = Number(position.averageEntryPrice);
+    const investment = Number((position.quantity * entryPrice).toFixed(2));
+    const currentValue = Number((position.quantity * currentLtp).toFixed(2));
+    const lotSizeByUnderlying: Record<string, number> = {
+      NIFTY50: 75,
+      BANKNIFTY: 30,
+      SENSEX: 20,
+      NIFTYIT: 25,
+    };
+    const lotSize = lotSizeByUnderlying[underlying] || 75;
+    return {
+      userId: position.userId,
+      position: {
+        id: position.id,
+        underlying,
+        strike: Number(strikeText),
+        optionType: optionTypeText as 'CE' | 'PE',
+        expiry: '',
+        side: 'BUY' as const,
+        lots: Math.floor(position.quantity / lotSize),
+        lotSize,
+        quantity: position.quantity,
+        entryPrice,
+        currentLtp,
+        investment,
+        currentValue,
+        pnl: Number((currentValue - investment).toFixed(2)),
+        pnlPercent: investment > 0 ? Number((((currentValue - investment) / investment) * 100).toFixed(2)) : 0,
+        status: 'OPEN' as const,
+        enteredAt: position.updatedAt.toISOString(),
+        stopLossPercent: position.stopLossPercent ? Number(position.stopLossPercent) : undefined,
+        exitTargetValue: position.exitTargetValue ? Number(position.exitTargetValue) : undefined,
+        tradeGroupId: position.tradeGroupId || undefined,
+      },
+    };
+  }));
+
+  for (const item of positions) {
+    const userPositions = groupedByUser.get(item.userId) || [];
+    userPositions.push(item.position);
+    groupedByUser.set(item.userId, userPositions);
+  }
+
+  for (const [userId, userPositions] of groupedByUser) {
+    await evaluateAndExecuteAutoExits(userId, userPositions);
+  }
 }

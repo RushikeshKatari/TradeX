@@ -63,7 +63,11 @@ export async function GET(request: NextRequest) {
 
       // Query live quote for mark-to-market P&L
       let currentLtp = Number(p.averageEntryPrice);
-      const chainRow = chain.strikes.find((row) => row.strikePrice === strike);
+      // The selected chain is only valid for positions on that same underlying.
+      // Other underlyings must use their own synthetic contract quote below.
+      const chainRow = posUnderlying === symbol
+        ? chain.strikes.find((row) => row.strikePrice === strike)
+        : undefined;
       const chainLeg = optionType === 'CE' ? chainRow?.ce : chainRow?.pe;
       if (chainLeg?.ltp && chainLeg.ltp > 0) {
         currentLtp = Number(chainLeg.ltp);
@@ -87,7 +91,8 @@ export async function GET(request: NextRequest) {
       const currentValue = Number((quantity * currentLtp).toFixed(2));
       const pnl = Number((currentValue - investment).toFixed(2));
       const pnlPercent = investment > 0 ? Number(((pnl / investment) * 100).toFixed(2)) : 0;
-      const lots = Math.floor(quantity / lotSize);
+      const positionLotSize = defaultLotSizes[posUnderlying] || lotSize;
+      const lots = Math.floor(quantity / positionLotSize);
 
       positions.push({
         id: p.id,
@@ -97,7 +102,7 @@ export async function GET(request: NextRequest) {
         expiry: chain.selectedExpiry,
         side: 'BUY',
         lots,
-        lotSize,
+        lotSize: positionLotSize,
         quantity,
         entryPrice,
         currentLtp,
@@ -113,13 +118,23 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 7. Auto-Exit Evaluation (50% stop loss, combined profit, 3:15 PM time exit)
+    // 7. Auto-Exit Evaluation (50% stop loss, combined profit, 3:45 PM time exit)
     const autoExitResults = await evaluateAndExecuteAutoExits(user.userId, positions);
     if (autoExitResults.length > 0) {
       // Re-fetch cash balance if any positions were auto-closed
       account = await prisma.virtualAccount.findUnique({ where: { userId: user.userId } });
       availableCash = account?.balance ? Number(account.balance) : availableCash;
     }
+
+    const realizedPositions = await prisma.position.findMany({
+      where: { userId: user.userId },
+      select: { symbol: true, realizedPnL: true },
+    });
+    const realizedPnl = realizedPositions.reduce((total, position) => (
+      /^([A-Z0-9]+)_(\d+(?:\.\d+)?)_(CE|PE)$/.test(position.symbol)
+        ? total + Number(position.realizedPnL)
+        : total
+    ), 0);
 
     // Filter active open positions for summary
     const activePositions = positions.filter((p) => p.status === 'OPEN');
@@ -132,6 +147,7 @@ export async function GET(request: NextRequest) {
       summary: {
         totalInvestment: Number(totalInvestment.toFixed(2)),
         currentPnl: Number(currentPnl.toFixed(2)),
+        realizedPnl: Number(realizedPnl.toFixed(2)),
         openPositions: activePositions.length,
         availableCash: Number(availableCash.toFixed(2)),
       },
