@@ -88,7 +88,7 @@ export function PortfolioView({ summary, positions, holdings, onRefresh }: Portf
         </div>
       </div>
 
-      {/* Active Positions Table */}
+      {/* Active Positions */}
       <div className="bg-[#0f172a] border border-border rounded-xl overflow-hidden shadow-xl">
         <div className="p-4 border-b border-border flex items-center justify-between">
           <h3 className="text-sm font-bold text-white uppercase tracking-wider">
@@ -102,24 +102,8 @@ export function PortfolioView({ summary, positions, holdings, onRefresh }: Portf
             No open paper trading positions currently held.
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs font-mono">
-              <thead>
-                <tr className="bg-slate-950 text-slate-400 border-b border-border text-[11px]">
-                  <th className="py-2.5 px-4 text-left">Symbol</th>
-                  <th className="py-2.5 px-3 text-right">Quantity</th>
-                  <th className="py-2.5 px-3 text-right">Lots</th>
-                  <th className="py-2.5 px-3 text-right">Lot Size</th>
-                  <th className="py-2.5 px-3 text-right">Avg Entry</th>
-                  <th className="py-2.5 px-3 text-right">LTP</th>
-                  <th className="py-2.5 px-3 text-right">Invested</th>
-                  <th className="py-2.5 px-3 text-right">Current Value</th>
-                  <th className="py-2.5 px-3 text-right">P&L (Unrealized)</th>
-                  <th className="py-2.5 px-4 text-center">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60">
-                {positions.map((pos) => {
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 p-4">
+            {positions.map((pos) => {
                   const isPos = pos.unrealizedPnL >= 0;
                   const isOption = pos.instrumentType === 'OPTION';
                   const displayedCurrentValue = isOption
@@ -140,36 +124,43 @@ export function PortfolioView({ summary, positions, holdings, onRefresh }: Portf
                     }
                   };
                   return (
-                    <tr key={pos.id} className="hover:bg-slate-800/50 transition-colors">
-                      <td className="py-3 px-4 text-left font-bold text-slate-200">
-                        <Link href={`/stocks/${pos.symbol}`} className="hover:text-indigo-400">
-                          {pos.symbol}
-                        </Link>
-                      </td>
-                      <td className="py-3 px-3 text-right text-slate-300">{pos.quantity}</td>
-                      <td className="py-3 px-3 text-right text-slate-300">{pos.lots || '—'}</td>
-                      <td className="py-3 px-3 text-right text-slate-300">{pos.lotSize || '—'}</td>
-                      <td className="py-3 px-3 text-right text-slate-400">{formatINR(pos.averageEntryPrice)}</td>
-                      <td className="py-3 px-3 text-right text-slate-200">{formatINR(pos.currentPrice)}</td>
-                      <td className="py-3 px-3 text-right text-slate-400">{formatINR(pos.investedValue)}</td>
-                      <td className="py-3 px-3 text-right font-medium text-slate-200">{formatINR(displayedCurrentValue)}</td>
-                      <td className={`py-3 px-3 text-right font-bold ${isPos ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {isPos ? '+' : ''}{formatINR(pos.unrealizedPnL)} ({isPos ? '+' : ''}{pos.unrealizedPnLPercent}%)
-                      </td>
-                      <td className="py-3 px-4 text-center">
+                    <div key={pos.id} className="rounded-lg border border-border bg-slate-900/60 p-4 hover:border-indigo-500/40 transition-colors">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <Link href={`/stocks/${pos.symbol}`} className="text-xs font-bold text-slate-400 hover:text-indigo-400">
+                            {pos.symbol}
+                          </Link>
+                          <div className="mt-1 flex items-baseline gap-2">
+                            <span className="text-[11px] uppercase tracking-wider text-slate-500">Strike</span>
+                            <span className="text-2xl font-bold font-mono text-white">{pos.strike ?? '—'}</span>
+                            {pos.optionType && (
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${pos.optionType === 'CE' ? 'bg-cyan-500/20 text-cyan-400' : 'bg-purple-500/20 text-purple-400'}`}>
+                                {pos.optionType}
+                              </span>
+                            )}
+                          </div>
+                        </div>
                         {isOption ? (
-                          <button onClick={handleManualExit} disabled={exitingId === pos.id} className="px-2.5 py-1 text-[11px] font-semibold bg-rose-600/20 text-rose-300 hover:bg-rose-600 hover:text-white rounded border border-rose-500/30 transition-all">
-                            {exitingId === pos.id ? 'Exiting...' : 'Manual Exit'}
-                          </button>
+                          <div className="text-right">
+                            <div className="text-[11px] uppercase tracking-wider text-slate-500">Exit</div>
+                            <button onClick={handleManualExit} disabled={exitingId === pos.id} className="mt-1 px-3 py-1.5 text-[11px] font-semibold bg-rose-600/20 text-rose-300 hover:bg-rose-600 hover:text-white rounded border border-rose-500/30 transition-all">
+                              {exitingId === pos.id ? 'Exiting...' : 'Exit'}
+                            </button>
+                          </div>
                         ) : (
-                          <Link href={`/stocks/${pos.symbol}`} className="px-2.5 py-1 text-[11px] font-semibold bg-rose-600/20 text-rose-300 hover:bg-rose-600 hover:text-white rounded border border-rose-500/30 transition-all">Trade / Square off</Link>
+                          <Link href={`/stocks/${pos.symbol}`} className="mt-1 px-3 py-1.5 text-[11px] font-semibold bg-rose-600/20 text-rose-300 hover:bg-rose-600 hover:text-white rounded border border-rose-500/30 transition-all">Trade / Square off</Link>
                         )}
-                      </td>
-                    </tr>
+                      </div>
+                      <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 border-t border-border pt-3 text-xs font-mono">
+                        <div><div className="text-slate-500">Current Value</div><div className="mt-1 font-semibold text-white">{formatINR(displayedCurrentValue)}</div></div>
+                        <div><div className="text-slate-500">P&L</div><div className={`mt-1 font-bold ${isPos ? 'text-emerald-400' : 'text-rose-400'}`}>{isPos ? '+' : ''}{formatINR(pos.unrealizedPnL)}</div></div>
+                        <div><div className="text-slate-500">LTP</div><div className="mt-1 text-slate-200">{formatINR(pos.currentPrice)}</div></div>
+                        <div><div className="text-slate-500">Lots / Qty</div><div className="mt-1 text-slate-200">{pos.lots || '—'} / {pos.quantity}</div></div>
+                      </div>
+                      <div className="mt-3 text-[11px] text-slate-500">Entry {formatINR(pos.averageEntryPrice)} · Invested {formatINR(pos.investedValue)} · {isPos ? '+' : ''}{pos.unrealizedPnLPercent}%</div>
+                    </div>
                   );
-                })}
-              </tbody>
-            </table>
+            })}
           </div>
         )}
       </div>
