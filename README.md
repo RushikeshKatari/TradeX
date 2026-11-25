@@ -180,3 +180,9 @@ npm run build
   - Email: `user@tradex.local`
   - Password: `UserSecurePassword123!`
   - Portal: `/dashboard`
+
+---
+
+## Desktop option-chain scraper
+
+The macOS TradeX desktop scraper and local options dashboard live in [`apps/tradex-desktop`](apps/tradex-desktop/README.md). It supports NIFTY, SENSEX, Gold Mini, and Silver Mini, local paper-position tracking, and technical analysis. The desktop app is a separate local application from this Next.js web platform.

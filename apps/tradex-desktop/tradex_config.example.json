@@ -1,0 +1,73 @@
+{
+  "refresh_seconds": 5,
+  "indices": [
+    {
+      "category": "equity",
+      "name": "NIFTY",
+      "display_name": "NIFTY",
+      "url": "https://groww.in/options/nifty",
+      "underlying_selector": "",
+      "selected_expiry": "",
+      "strikes": [],
+      "browser_rendered": true,
+      "row_selector": "",
+      "lot_size": 65,
+      "selectors": {
+        "expiry": "",
+        "strike": "",
+        "call": "",
+        "put": ""
+      },
+      "exclude_illiquid": false
+    },
+    {
+      "category": "equity",
+      "name": "SENSEX",
+      "display_name": "SENSEX",
+      "lot_size": 20,
+      "url": "https://groww.in/options/sp-bse-sensex",
+      "browser_rendered": true,
+      "row_selector": "",
+      "selected_expiry": "",
+      "strikes": [],
+      "underlying_selector": "",
+      "selectors": {
+        "call": "",
+        "expiry": "",
+        "put": "",
+        "strike": ""
+      },
+      "exclude_illiquid": false
+    },
+    {
+      "category": "commodity",
+      "name": "GOLDM",
+      "display_name": "Gold Mini",
+      "lot_size": 10,
+      "url": "https://groww.in/commodities/options/mcx_goldm",
+      "selected_expiry": "",
+      "exclude_illiquid": true,
+      "browser_rendered": false,
+      "strikes": [],
+      "selectors": {}
+    },
+    {
+      "category": "commodity",
+      "name": "SILVERM",
+      "display_name": "Silver Mini",
+      "lot_size": 5,
+      "url": "https://groww.in/commodities/options/mcx_silverm",
+      "selected_expiry": "",
+      "exclude_illiquid": true,
+      "browser_rendered": false,
+      "strikes": [],
+      "selectors": {}
+    }
+  ],
+  "sheets": {
+    "enabled": false,
+    "spreadsheet_id": "",
+    "credentials_file": "",
+    "worksheet": "Options"
+  }
+}

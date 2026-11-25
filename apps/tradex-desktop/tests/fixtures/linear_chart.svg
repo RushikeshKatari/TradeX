@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="240" viewBox="0 0 400 240">
+ <g transform="translate(10 5) scale(2)">
+  <text x="2" y="10">₹200</text><text x="2" y="60">₹100</text><text x="2" y="110">₹0</text>
+  <path d="M10 60 L50 50 L100 40 L150 30 L200 40" stroke="#456" fill="none"/>
+  <path d="M10 60 L50 50 L100 40 L150 30 L200 40 L200 110 L10 110 Z" fill="#abc"/>
+ </g>
+</svg>

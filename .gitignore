@@ -44,3 +44,22 @@ coverage/
 __pycache__/
 *.py[cod]
 logs/
+
+# TradeX desktop scraper: keep machine-local credentials, market snapshots,
+# trading history, virtual environments, and compiled macOS bundles private.
+apps/tradex-desktop/.venv/
+apps/tradex-desktop/.venv.*/
+apps/tradex-desktop/TradeX.app/
+apps/tradex-desktop/temporal-*.json
+apps/tradex-desktop/.env*
+apps/tradex-desktop/**/*credentials*.json
+apps/tradex-desktop/**/*service-account*.json
+apps/tradex-desktop/tradex_config.json
+apps/tradex-desktop/tradex_last_snapshot.json
+apps/tradex-desktop/tradex_trades.sqlite3*
+apps/tradex-desktop/*.log
+apps/tradex-desktop/.DS_Store
+apps/tradex-desktop/**/.DS_Store
+apps/tradex-desktop/**/__pycache__/
+apps/tradex-desktop/**/.DS_Store
+apps/tradex-desktop/TradeX-macOS.zip

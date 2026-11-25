@@ -1,0 +1,708 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TradeX Pro · Options Chain &amp; Trading Terminal</title>
+  <link rel="stylesheet" href="/static/css/main.css?v=2.12">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Top Glassmorphism Navigation Bar -->
+  <header class="app-header">
+    <div class="brand-section">
+      <a href="/" class="brand-logo">
+        <div class="brand-icon">⚡</div>
+        <span>TRADE<strong style="color: var(--primary);">X</strong></span>
+        <span class="brand-badge">PRO TERMINAL</span>
+      </a>
+    </div>
+
+    <!-- Live Market Ticker & Status -->
+    <div class="header-metrics">
+      <div class="metric-pill">
+        <span class="status-dot" id="headerStatusDot"></span>
+        <span class="label">Engine</span>
+        <span class="val" id="headerStatusText">Connecting…</span>
+      </div>
+
+      <div class="metric-pill">
+        <span class="label">Index</span>
+        <span class="val highlight" id="topSelectedBadge">NIFTY</span>
+      </div>
+
+      <div class="metric-pill">
+        <span class="label">Spot</span>
+        <span class="val tabular green" id="topSpotPrice">—</span>
+      </div>
+
+      <div class="metric-pill">
+        <span class="label">Contracts</span>
+        <span class="val tabular" id="topContractCount">0</span>
+      </div>
+
+      <div class="metric-pill">
+        <span class="label">Last Sync</span>
+        <span class="val tabular" id="topLastSync">—</span>
+      </div>
+
+      <div class="metric-pill" style="color: var(--text-dim);">
+        <span id="headerClock">00:00:00 IST</span>
+      </div>
+    </div>
+
+    <!-- Header Actions -->
+    <div class="header-actions">
+      <div class="backend-scrape-toggle is-off" id="scrapeBtn" role="status" aria-live="polite" aria-pressed="false">
+        App Scraping · OFF
+      </div>
+      <button class="btn" onclick="openSheetsModal()" title="Google Sheets &amp; Global Config">
+        ⚙ Settings
+      </button>
+    </div>
+  </header>
+
+  <!-- Primary Tabbed Navigation -->
+  <nav class="app-nav" role="tablist">
+    <div class="nav-tabs">
+      <button class="nav-tab active" data-tab="terminal" onclick="showPageTab('terminal')" role="tab" aria-selected="true">
+        <span class="tab-icon">⚡</span>
+        <span>Terminal &amp; Pairs</span>
+      </button>
+      <button class="nav-tab" data-tab="pnl" onclick="showPageTab('pnl')" role="tab" aria-selected="false">
+        <span class="tab-icon">💼</span>
+        <span>Positions &amp; PnL</span>
+      </button>
+      <button class="nav-tab" data-tab="chart" onclick="showPageTab('chart')" role="tab" aria-selected="false">
+        <span class="tab-icon">📈</span>
+        <span>Technical Analysis</span>
+      </button>
+      <button class="nav-tab" data-tab="automation" onclick="showPageTab('automation')" role="tab" aria-selected="false">
+        <span class="tab-icon">🤖</span>
+        <span>Automation &amp; Sheets</span>
+      </button>
+      <button class="nav-tab" data-tab="logs" onclick="showPageTab('logs')" role="tab" aria-selected="false">
+        <span class="tab-icon">📜</span>
+        <span>System Audit</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Main Container -->
+  <main class="app-main">
+
+    <!-- ====================================================================
+         TAB 1: Terminal & Symmetric Pair Finder (The Core Trading Workspace)
+         ==================================================================== -->
+    <div id="panel-terminal" class="tab-panel active">
+
+      <!-- Interactive Index Selector Bar -->
+      <section class="index-bar">
+        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+          <span style="font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase;">Select Market:</span>
+          <div id="indexChips" class="index-chips"></div>
+          <select id="pairIndex" style="display: none;" aria-hidden="true"></select>
+        </div>
+        <div class="index-info">
+          <span id="indexSpotDisplay" class="index-spot">—</span>
+          <span id="indexRuleBadge" class="index-rule-badge">NIFTY 50-pt Center Rule</span>
+        </div>
+      </section>
+
+      <!-- Main Trading Grid: Symmetric Pairs Finder + Live Option Chain -->
+      <div class="grid-split">
+
+        <!-- Left Column: Affordable Symmetric Pair Finder -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">
+                <span>🎯 Affordable Symmetric Pair Finder</span>
+              </div>
+              <div class="card-subtitle">
+                Calibrated CE &amp; PE pairs with optimal delta hedging and automated lot budgeting.
+              </div>
+            </div>
+          </div>
+
+          <!-- Streamlined Parameter Input Form -->
+          <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div class="form-group" style="flex: 1; min-width: 220px;">
+              <label for="pairBudget">Total Budget (₹)</label>
+              <input id="pairBudget" class="form-control" type="number" min="1" value="25000" oninput="renderPairs()" style="font-size: 15px; font-weight: 700;">
+              <div class="preset-buttons">
+                <button type="button" class="preset-btn" onclick="setBudgetPreset(15000)">₹15k</button>
+                <button type="button" class="preset-btn" onclick="setBudgetPreset(25000)">₹25k</button>
+                <button type="button" class="preset-btn" onclick="setBudgetPreset(50000)">₹50k</button>
+                <button type="button" class="preset-btn" onclick="setBudgetPreset(100000)">₹1L</button>
+              </div>
+            </div>
+
+            <div class="form-group" style="min-width: 260px;">
+              <label for="pairSortFilter">Sorting Filter</label>
+              <select id="pairSortFilter" class="form-control" onchange="renderPairs()" style="font-size: 13px; font-weight: 600; padding: 7px 10px;">
+                <option value="equidistance">Equidistance</option>
+                <option value="equidistance_desc">Equidistance (Large to Small)</option>
+                <option value="budget_desc">High budget usage to Low</option>
+                <option value="budget_asc">Low budget usage to High</option>
+                <option value="default">Default Recommended (0/100, -100/0, ±100..±800, all)</option>
+              </select>
+            </div>
+
+            <!-- Automatic Backend Meta Badges -->
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding-bottom: 4px;">
+              <div class="metric-pill" title="Target expiry automatically selected to latest">
+                <span class="label">Expiry</span>
+                <span class="val highlight" id="autoExpiryBadge">Latest</span>
+              </div>
+              <div class="metric-pill" title="Backend lot sizing rules applied">
+                <span class="label">Lot</span>
+                <span class="val" id="backendLotBadge">Auto</span>
+              </div>
+              <div class="metric-pill" id="dataSourceBadgePill" title="Source of active quotes">
+                <span class="status-dot active" id="dataSourceDot"></span>
+                <span class="label">Feed</span>
+                <span class="val" id="dataSourceText">Live</span>
+              </div>
+            </div>
+
+            <!-- Hidden compatibility inputs for backend logic -->
+            <input type="hidden" id="pairExpiry">
+            <input type="hidden" id="pairLot">
+            <input type="hidden" id="pairDistances">
+          </div>
+
+          <div id="centerInfo" style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
+            Connecting to underlying quotes…
+          </div>
+
+          <!-- Calculated Pairs Table -->
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th style="min-width: 170px;">Call Strike / LTP</th>
+                  <th style="text-align: center; min-width: 130px;">Center Strike</th>
+                  <th style="min-width: 170px;">Put Strike / LTP</th>
+                  <th style="min-width: 140px;">Total Capital</th>
+                  <th style="min-width: 155px; text-align: center; padding: 6px 8px;">
+                    <div style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; font-weight: 700;">Mode (Groww / Zerodha)</div>
+                    <!-- Broker Mode Toggle lives in the header cell -->
+                    <div id="brokerModeToggle" style="display: inline-flex; align-items: center; justify-content: center; gap: 0; border-radius: 8px; overflow: hidden; border: 1.5px solid var(--border-card); margin: 0 auto; width: fit-content; background: var(--bg-input);">
+                      <button id="modeBtnGroww"
+                        type="button"
+                        onclick="setBrokerMode('groww')"
+                        style="padding: 4px 14px; font-size: 12px; font-weight: 700; border: none; cursor: pointer; background: var(--primary); color: #000; transition: all 0.2s;">
+                        🚀 Groww
+                      </button>
+                      <button id="modeBtnZerodha"
+                        type="button"
+                        onclick="setBrokerMode('zerodha')"
+                        style="padding: 4px 14px; font-size: 12px; font-weight: 600; border: none; cursor: pointer; background: transparent; color: var(--text-muted); transition: all 0.2s;">
+                        🪁 Zerodha
+                      </button>
+                    </div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody id="pairRows">
+                <tr><td colspan="5" style="text-align: center; padding: 24px; color: var(--text-muted);">Configure budget or select an index above to evaluate pairs.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Right Column: Live Options Chain Matrix -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">
+                <span>📊 Live Options Chain</span>
+              </div>
+              <div class="card-subtitle">
+                Streaming quotes for active strikes. Auto-centered to current price.
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+              <span id="chainPairSpanBadge" style="display: none; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; background: rgba(56, 189, 248, 0.15); color: var(--primary); border: 1px solid rgba(56, 189, 248, 0.3);"></span>
+              <button class="btn btn-outline btn-sm" onclick="scrollToAtmStrike(true)" title="Center on ATM Strike" style="padding: 4px 10px; font-size: 11px; white-space: nowrap;">
+                🎯 Center ATM
+              </button>
+              <div style="width: 130px;">
+                <input id="chainSearch" class="form-control" placeholder="🔍 Search…" oninput="filterOptionChain()" style="padding: 4px 8px; font-size: 11px;">
+              </div>
+            </div>
+          </div>
+
+          <div id="chainTableContainer" class="table-responsive" style="min-height: 520px; max-height: 620px; overflow-y: auto; scroll-behavior: smooth; transition: max-height 0.25s ease;">
+            <table class="data-table" style="width: 100%;">
+              <thead style="position: sticky; top: 0; z-index: 10; background: var(--bg-card);">
+                <tr>
+                  <th style="text-align: right; width: 38%; padding-right: 18px;">Call (CE)</th>
+                  <th style="text-align: center; width: 24%;">Strike</th>
+                  <th style="text-align: left; width: 38%; padding-left: 18px;">Put (PE)</th>
+                </tr>
+              </thead>
+              <tbody id="chainRows">
+                <tr><td colspan="3" style="text-align: center; padding: 24px; color: var(--text-muted);">Waiting for option contracts snapshot…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+
+    <div id="panel-pnl" class="tab-panel">
+
+      <!-- Summary Bar -->
+      <section class="pnl-summary-bar">
+        <div class="summary-card">
+          <span class="title">Net Unrealized P&amp;L</span>
+          <span class="val call-val" id="sumTotalPnl">+₹0.00</span>
+        </div>
+        <div class="summary-card">
+          <span class="title">Total Capital Invested</span>
+          <span class="val" id="sumInvested">₹0.00</span>
+        </div>
+        <div class="summary-card">
+          <span class="title">Active Positions</span>
+          <span class="val" id="sumActivePositions">0</span>
+        </div>
+        <div class="summary-card">
+          <span class="title">Targets Reached</span>
+          <span class="val highlight" id="sumTargetsReached">0</span>
+        </div>
+      </section>
+
+      <!-- Action Bar -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div>
+          <h2 style="font-size: 20px; font-weight: 800;">Tracked Options Positions</h2>
+          <p style="font-size: 13px; color: var(--text-muted);">Real-time valuation and automated profit-target notifications.</p>
+        </div>
+        <button class="btn btn-primary" onclick="openPnlModal()">
+          ＋ Add New Position
+        </button>
+      </div>
+
+      <!-- Positions Grid -->
+      <div id="pnlPositionsGrid" class="pnl-grid"></div>
+
+      <section class="pnl-history-section">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin:28px 0 12px;">
+          <div>
+            <h2 style="font-size:18px; font-weight:800;">Trades Taken</h2>
+            <p style="font-size:12px; color:var(--text-muted);">A trade appears here only after you click Exit Trade. Records are saved locally.</p>
+          </div>
+          <button class="btn btn-outline btn-sm" type="button" onclick="loadClosedTrades()">↻ Refresh</button>
+        </div>
+        <div id="pnlClosedTrades"></div>
+      </section>
+    </div>
+
+
+    <!-- ====================================================================
+         TAB 3: Automatic Technical Analysis & Historical Level Memory
+         ==================================================================== -->
+    <div id="panel-chart" class="tab-panel">
+      <section class="card ta-shell">
+        <div class="ta-heading">
+          <div>
+            <div class="card-title">📈 Automatic Technical Analysis</div>
+            <div class="card-subtitle">Price action, multi-timeframe structure, and persistent historical levels.</div>
+          </div>
+          <div class="ta-controls">
+            <label>Instrument<select id="taSymbol" class="form-control"><option value="XAUUSDT">Gold · XAUUSDT</option><option value="XAGUSDT">Silver · XAGUSDT</option><option value="BTCUSDT">Bitcoin · BTCUSDT</option><option value="ETHUSDT">Ethereum · ETHUSDT</option></select></label>
+            <label>Timeframe<select id="taTimeframe" class="form-control"><option value="1m">1 minute</option><option value="5m">5 minutes</option><option value="15m" selected>15 minutes</option><option value="1h">1 hour</option><option value="4h">4 hours</option><option value="1d">1 day</option></select></label>
+            <button id="taRefresh" class="btn btn-primary" type="button">↻ Refresh analysis</button>
+          </div>
+        </div>
+        <div class="ta-stats">
+          <div><span>MARKET PRICE</span><strong id="taPrice">—</strong></div>
+          <div><span>STRUCTURE</span><strong id="taTrend">Loading…</strong></div>
+          <div><span>TIMEFRAME</span><strong id="taCurrentTimeframe">15m</strong></div>
+          <div><span>LAST ANALYSIS</span><strong id="taUpdated">—</strong></div>
+        </div>
+        <div id="taTimeframeConfluence" class="ta-timeframe-confluence">Loading timeframe history…</div>
+        <div id="taNotice" class="ta-notice" hidden></div>
+        <div class="ta-toolbar">
+          <button class="ta-layer-toggle is-on" type="button" data-layer="support" aria-pressed="true">Support</button>
+          <button class="ta-layer-toggle is-on" type="button" data-layer="resistance" aria-pressed="true">Resistance</button>
+          <button class="ta-layer-toggle is-on" type="button" data-layer="trendlines" aria-pressed="true">Trendlines</button>
+          <button class="ta-layer-toggle is-on" type="button" data-layer="fvg" aria-pressed="true">Fair Value Gaps</button>
+          <button class="ta-layer-toggle is-on" type="button" data-layer="supply" aria-pressed="true">Supply Zones</button>
+          <button class="ta-layer-toggle is-on" type="button" data-layer="demand" aria-pressed="true">Demand Zones</button>
+          <button class="ta-layer-toggle is-on" type="button" data-layer="historical" aria-pressed="true">Historical Levels</button>
+          <button class="ta-layer-toggle is-on" type="button" data-layer="structure" aria-pressed="true">BOS / CHOCH</button>
+          <button class="ta-layer-toggle is-on" type="button" data-layer="mtf" aria-pressed="true">Multi-Timeframe</button>
+          <button class="ta-layer-toggle is-off" type="button" data-layer="options" aria-pressed="false" disabled title="Binance XAUUSDT futures does not provide MCX Gold Mini options positioning.">Options Levels · unavailable</button>
+          <label class="ta-analysis-mode">Analysis mode<select id="taAnalysisMode" class="form-control"><option value="complete">Complete analysis</option><option value="support">Support only</option><option value="resistance">Resistance only</option><option value="bullish">Bullish scenario</option><option value="bearish">Bearish scenario</option></select></label>
+          <button id="taResetView" class="btn btn-sm" type="button">Reset view</button>
+        </div>
+        <div id="taChartWrap" class="ta-chart-wrap"><canvas id="taCanvas" aria-label="Candlestick chart with automatic technical analysis drawings"></canvas><div id="taHoverCard" class="ta-hover-card" hidden></div></div>
+        <div class="ta-chart-help">Drag to pan · Scroll to zoom · Hover a candle or level for details · Green: bullish/support · Red: bearish/resistance</div>
+      </section>
+      <section class="ta-commentary-card card">
+        <div class="ta-commentary-top"><div><div class="card-title">Live Market Commentary</div><div class="card-subtitle">Event-based, conditional analysis from confirmed candles. Levels and targets are calculated from market data.</div></div><span id="taEventBadge" class="ta-event-badge">ANALYZING</span></div>
+        <h3 id="taCommentaryTitle">Waiting for market structure…</h3>
+        <p id="taCommentaryText" class="ta-commentary-text">The analysis will show what is forming, what confirms either side, and what invalidates the scenario.</p>
+        <div id="taCommentaryMeta" class="ta-commentary-meta"></div>
+        <div id="taDirectionMeters" class="ta-direction-meters" aria-live="polite"></div>
+        <div id="taLongHistoryContext" class="ta-long-history-context">Loading available long-term daily history…</div>
+        <div id="taLevelPanels" class="ta-level-panels"></div>
+        <div id="taScenarioCards" class="ta-scenario-grid"></div>
+        <div id="taAnalysisDisclaimer" class="ta-analysis-disclaimer"></div>
+      </section>
+      <section class="card ta-commentary-history-card"><div class="card-title">Commentary &amp; Prediction History</div><div class="card-subtitle">Repeated states are deduplicated; recorded prediction conditions stay attached to their original setup.</div><div id="taCommentaryFeed" class="ta-commentary-feed"><div class="ta-empty">Waiting for the first market event.</div></div></section>
+      <div class="ta-lower-grid">
+        <section class="card"><div class="card-title">Historical Level Memory</div><div class="card-subtitle">Saved locally across reloads and timeframe changes.</div><div id="taLevels" class="ta-level-list"><div class="ta-empty">Loading stored levels…</div></div></section>
+        <section class="card"><div class="card-title">Market Structure</div><div class="card-subtitle">Confirmed swing points and closed-candle breaks.</div><div id="taStructureSummary" class="ta-structure-summary">Waiting for candle history…</div><div id="taHistoricalStats" class="ta-structure-summary">Building historical reaction sample…</div><div id="taEvents" class="ta-event-list"></div></section>
+      </div>
+      <div class="ta-footnote">Structures are rule-based technical annotations. Forming candles are shown separately; swing points and break confirmations use closed candles.</div>
+    </div>
+
+
+    <!-- ====================================================================
+         TAB 4: Automation & Google Sheets Hub
+         ==================================================================== -->
+    <div id="panel-automation" class="tab-panel">
+      <div class="grid-2">
+
+        <!-- Scraper Control Banner -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">
+                <span>⚡ Automated Scraper Engine</span>
+              </div>
+              <div class="card-subtitle">
+                Scheduled snapshot cycles (09:15 AM – 03:39 PM IST).
+              </div>
+            </div>
+          </div>
+
+          <div style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 18px; margin-bottom: 16px;">
+            <div style="font-size: 12px; color: var(--text-dim); text-transform: uppercase; font-weight: 700;">Engine Status</div>
+            <div id="scraperBannerStatus" style="font-size: 18px; font-weight: 800; color: var(--text-main); margin: 4px 0 12px;">
+              Checking status…
+            </div>
+            <p style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+              When active, TradeX automatically polls configured index pages once per minute, parses the live DOM/JSON feeds, and batches updates into memory and Google Sheets.
+            </p>
+          </div>
+
+          <div style="display: flex; gap: 10px;">
+            <button class="btn btn-primary" onclick="toggleScraping()">
+              Toggle Scraping Mode
+            </button>
+            <button class="btn" id="scanChartsBtn" onclick="triggerScanAllCharts()">
+              ⚡ Sweep All Strike Charts
+            </button>
+          </div>
+        </div>
+
+        <!-- Google Sheets Sync Hub -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">
+                <span>📑 Google Sheets Synchronization</span>
+              </div>
+              <div class="card-subtitle">
+                Batch appending throttled once per minute to respect API limits.
+              </div>
+            </div>
+            <button class="btn btn-sm" onclick="openSheetsModal()">Configure</button>
+          </div>
+
+          <div class="sheets-progress-container">
+            <div class="sheets-progress-header">
+              <span id="sheetsProgressText">Waiting for next sync batch</span>
+              <span id="sheetsProgressCount" style="font-weight: 700; color: var(--primary);">0%</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" id="sheetsProgressBar"></div>
+            </div>
+          </div>
+
+          <div style="margin-top: 18px; font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+            <strong>Target Worksheet:</strong> <span id="displayWorksheet" style="color: var(--text-main);">Options</span><br>
+            <strong>Throttling:</strong> 60s minimum interval with deduplication safeguards.
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Configured Indices Section -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">
+              <span>🌐 Configured Markets</span>
+            </div>
+            <div class="card-subtitle">
+              Public options chains extracted via Chromium or static CSS selectors.
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="openIndexModal()">＋ Add Market</button>
+        </div>
+
+        <div id="indicesList"></div>
+      </div>
+    </div>
+
+
+    <!-- ====================================================================
+         TAB 5: Activity Logs & System Audit
+         ==================================================================== -->
+    <div id="panel-logs" class="tab-panel">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">
+              <span>📜 Real-Time Activity Log</span>
+            </div>
+            <div class="card-subtitle">
+              Chronological audit trail of scrapers, network events, and Sheets updates.
+            </div>
+          </div>
+          <div style="display: flex; gap: 6px;">
+            <button class="btn btn-sm log-filter-btn active" data-level="all" onclick="filterLogs('all')">All</button>
+            <button class="btn btn-sm log-filter-btn" data-level="info" onclick="filterLogs('info')">Info</button>
+            <button class="btn btn-sm log-filter-btn" data-level="warning" onclick="filterLogs('warning')">Warnings</button>
+            <button class="btn btn-sm log-filter-btn" data-level="error" onclick="filterLogs('error')">Errors</button>
+          </div>
+        </div>
+
+        <div class="log-console" id="activityLogList">
+          <div style="color: var(--text-dim); padding: 14px; text-align: center;">Listening for system events…</div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+
+  <!-- ====================================================================
+       MODALS
+       ==================================================================== -->
+
+  <!-- Modal: Add / Edit Position -->
+  <div class="modal-backdrop" id="pnlModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title">Add Options Position</div>
+        <button class="modal-close" onclick="closePnlModal()">✕</button>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Index</label>
+          <select id="pnlIndex" class="form-control" onchange="populatePnlExpiries()"></select>
+        </div>
+        <div class="form-group">
+          <label>Expiry</label>
+          <select id="pnlExpiry" class="form-control"></select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Call Strike (CE)</label>
+          <input id="pnlCallStrike" class="form-control" type="number" step="any" placeholder="e.g. 25800">
+        </div>
+        <div class="form-group">
+          <label>Call Entry Price (₹)</label>
+          <input id="pnlCallEntry" class="form-control" type="number" step="any" placeholder="e.g. 145.20">
+        </div>
+        <div class="form-group">
+          <label>Call Lots</label>
+          <input id="pnlCallLots" class="form-control" type="number" min="1" step="1" value="1">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Put Strike (PE)</label>
+          <input id="pnlPutStrike" class="form-control" type="number" step="any" placeholder="e.g. 25600">
+        </div>
+        <div class="form-group">
+          <label>Put Entry Price (₹)</label>
+          <input id="pnlPutEntry" class="form-control" type="number" step="any" placeholder="e.g. 120.50">
+        </div>
+        <div class="form-group">
+          <label>Put Lots</label>
+          <input id="pnlPutLots" class="form-control" type="number" min="1" step="1" value="1">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Profit Target Amount (₹)</label>
+        <input id="pnlTarget" class="form-control" type="number" step="any" placeholder="Target combined current value (₹)">
+        <span class="form-hint">Triggers visual alerts &amp; browser push notifications when reached.</span>
+      </div>
+
+      <div id="pnlFormError" style="color: var(--put-red); font-size: 12px;"></div>
+
+      <div class="modal-footer">
+        <button class="btn" onclick="closePnlModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="savePnlPosition()">Save Position</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="pnlEditModal">
+    <div class="modal-box" style="max-width:620px;">
+      <div class="modal-header">
+        <div class="modal-title">Edit Position Entry</div>
+        <button class="modal-close" onclick="closeEditPnlPosition()">✕</button>
+      </div>
+      <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">Update the paper entry price and lot count for each leg.</p>
+      <div id="pnlEditLegFields"></div>
+      <div id="pnlEditError" style="color:var(--put-red); font-size:12px;"></div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeEditPnlPosition()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveEditedPnlPosition()">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Modal: Add / Edit Index Source -->
+  <div class="modal-backdrop" id="indexModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title" id="indexModalTitle">Add Market Source</div>
+        <button class="modal-close" onclick="closeIndexModal()">✕</button>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Market Category</label>
+          <select id="idxCategory" class="form-control"><option value="equity">Equity</option><option value="commodity">Commodity</option></select>
+        </div>
+        <div class="form-group">
+          <label>Internal Symbol</label>
+          <input id="idxName" class="form-control" placeholder="e.g. NIFTY, GOLDM">
+        </div>
+        <div class="form-group">
+          <label>Display Name</label>
+          <input id="idxDisplayName" class="form-control" placeholder="e.g. Gold Mini">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Target URL</label>
+          <input id="idxUrl" class="form-control" placeholder="https://groww.in/options/nifty">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Selected Expiry</label>
+          <input id="idxExpiry" class="form-control" placeholder="YYYY-MM-DD or exact text">
+        </div>
+        <div class="form-group">
+          <label>Exact Strikes (comma separated)</label>
+          <input id="idxStrikes" class="form-control" placeholder="Leave blank for all strikes">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Underlying Spot Price CSS Selector</label>
+        <input id="idxUnderlyingSelector" class="form-control" placeholder="Optional, e.g. .spot-price">
+      </div>
+
+      <div class="form-group" style="margin: 10px 0;">
+        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+          <input type="checkbox" id="idxBrowserRendered" checked>
+          <span>Read JavaScript-rendered rows with Chrome (Playwright Engine)</span>
+        </label>
+      </div>
+
+      <div class="form-group">
+        <label>Row CSS Selector</label>
+        <input id="idxRowSelector" class="form-control" placeholder="table tbody tr (leave blank for default)">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Expiry Selector</label>
+          <input id="selExpiry" class="form-control" placeholder="td.expiry">
+        </div>
+        <div class="form-group">
+          <label>Strike Selector</label>
+          <input id="selStrike" class="form-control" placeholder="td.strike">
+        </div>
+        <div class="form-group">
+          <label>Call Selector</label>
+          <input id="selCall" class="form-control" placeholder="td.call">
+        </div>
+        <div class="form-group">
+          <label>Put Selector</label>
+          <input id="selPut" class="form-control" placeholder="td.put">
+        </div>
+      </div>
+
+      <div id="indexFormError" style="color: var(--put-red); font-size: 12px;"></div>
+
+      <div class="modal-footer">
+        <button class="btn" onclick="closeIndexModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveIndexForm()">Save Source</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Modal: Google Sheets Settings -->
+  <div class="modal-backdrop" id="sheetsModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title">Google Sheets Sync Settings</div>
+        <button class="modal-close" onclick="closeSheetsModal()">✕</button>
+      </div>
+
+      <div class="form-group" style="margin: 8px 0;">
+        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+          <input type="checkbox" id="sheetsEnabled">
+          <span style="font-weight: 700;">Enable Automatic Snapshot Publishing</span>
+        </label>
+      </div>
+
+      <div class="form-group">
+        <label>Google Spreadsheet ID</label>
+        <input id="sheetId" class="form-control" placeholder="Spreadsheet ID from your Google Sheets URL">
+      </div>
+
+      <div class="form-group">
+        <label>Worksheet Tab Name</label>
+        <input id="sheetWorksheet" class="form-control" value="Options" placeholder="Options">
+      </div>
+
+      <div class="form-group">
+        <label>Service Account JSON File Path</label>
+        <input id="sheetCredentials" class="form-control" placeholder="credentials/service-account.json">
+        <span class="form-hint">Make sure you have shared the spreadsheet with the service account client email.</span>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn" onclick="closeSheetsModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveSheetsForm()">Save Configuration</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Scripts -->
+  <script src="/static/js/app.js?v=2.16"></script>
+  <script src="/static/js/chart.js?v=3.4"></script>
+</body>
+</html>

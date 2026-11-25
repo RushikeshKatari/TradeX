@@ -1,0 +1,9 @@
+Flask
+requests
+beautifulsoup4
+playwright
+Pillow<13
+pytesseract
+# Optional Google Sheets publishing:
+gspread
+google-auth
