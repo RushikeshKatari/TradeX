@@ -29,6 +29,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not update pip.' }
 if ($LASTEXITCODE -ne 0) { throw 'Could not install TradeX dependencies.' }
 & $venvPython -m playwright install chromium
 if ($LASTEXITCODE -ne 0) { throw 'Could not install the Playwright Chromium browser.' }
+& $venvPython (Join-Path $installDir 'generate_logo_assets.py')
+if ($LASTEXITCODE -ne 0) { throw 'Could not generate the TradeX shortcut logo.' }
 
 $desktop = [Environment]::GetFolderPath('Desktop')
 $shortcutPath = Join-Path $desktop 'TradeX.lnk'
@@ -39,6 +41,7 @@ $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $powershell
 $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$launcher`""
 $shortcut.WorkingDirectory = $installDir
+$shortcut.IconLocation = (Join-Path $installDir 'assets\TradeX.ico') + ',0'
 $shortcut.Description = 'Launch the local TradeX dashboard'
 $shortcut.Save()
 

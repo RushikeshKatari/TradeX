@@ -2,6 +2,8 @@
 
 TradeX is a local desktop app for viewing equity and commodity option chains, managing paper positions, and exploring technical analysis charts. It supports NIFTY and SENSEX under Equity, and Gold Mini and Silver Mini under Commodity. It does not place real orders and has no user accounts or admin login.
 
+The supplied TradeX artwork is used as the app icon on macOS, the Windows desktop shortcut icon, and the dashboard brand mark. The original image and generated platform icon assets are kept in `apps/tradex-desktop/assets/`.
+
 The app runs on your computer and serves its dashboard only on the local machine. Windows and macOS setup scripts install the app and its Python dependencies; on Windows the installer adds a desktop shortcut, and on macOS it builds and installs `TradeX.app`.
 
 ## Install on Windows

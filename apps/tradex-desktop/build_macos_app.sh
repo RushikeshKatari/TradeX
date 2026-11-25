@@ -19,6 +19,16 @@ if [[ ! -d "$CHROMIUM" || ! -d "$HEADLESS_SHELL" ]]; then
 fi
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$RES/backend" "$RES/runtime" "$RES/ms-playwright"
+LOGO_PYTHON="$RUNTIME/bin/python"
+if ! "$LOGO_PYTHON" -c 'import PIL' >/dev/null 2>&1; then
+  LOGO_PYTHON="$(command -v python3 || true)"
+fi
+if [[ -z "$LOGO_PYTHON" ]] || ! "$LOGO_PYTHON" -c 'import PIL' >/dev/null 2>&1; then
+  echo "Pillow is required to generate app icons. Install requirements.txt and retry." >&2
+  exit 1
+fi
+"$LOGO_PYTHON" "$ROOT/generate_logo_assets.py"
+cp "$ROOT/assets/TradeX.icns" "$RES/TradeX.icns"
 cp "$ROOT/app.py" "$ROOT/chart_analyzer.py" "$ROOT/technical_analysis.py" "$ROOT/market_intelligence.py" "$ROOT/groww_scraper.py" "$ROOT/scan_all_strikes_to_sheets.py" "$ROOT/sweep_and_extract_groww.py" "$ROOT/groww_interactive_chart_scanner.py" "$ROOT/ocr_number_extractor.py" "$ROOT/requirements.txt" "$RES/backend/"
 cp "$ROOT/tradex_config.example.json" "$RES/backend/tradex_config.json"
 cp -R "$ROOT/templates" "$ROOT/static" "$ROOT/flask" "$ROOT/werkzeug" "$ROOT/requests" "$ROOT/bs4" "$RES/backend/"
@@ -31,6 +41,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleExecutable</key><string>TradeX</string>
 <key>CFBundleIdentifier</key><string>com.tradex.desktop</string>
 <key>CFBundleName</key><string>TradeX</string>
+<key>CFBundleIconFile</key><string>TradeX.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
 <key>LSMinimumSystemVersion</key><string>12.0</string>

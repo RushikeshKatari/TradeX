@@ -2,6 +2,8 @@
 
 A local dashboard for equity and commodity option chains, selecting exact strikes and expiries, and optionally publishing matches to Google Sheets. The built-in markets are NIFTY and SENSEX under Equity, plus Gold Mini and Silver Mini under Commodity.
 
+The supplied TradeX logo appears in the dashboard and as the macOS app and Windows shortcut icon. Its source and generated icons are kept under `assets/`; run `python generate_logo_assets.py` after replacing the source image to regenerate them.
+
 ## Install the desktop app
 
 Use the repository root README for complete Windows and macOS installation commands. In short:
