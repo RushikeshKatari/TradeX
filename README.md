@@ -1,190 +1,45 @@
-# TradeX — Indian Market Paper Trading & Technical Analysis Platform
+# TradeX Universal Options Chain Scraper
 
-> **EDUCATIONAL & PAPER TRADING NOTICE:** TradeX is an educational paper-trading platform utilizing simulated virtual capital. It never executes real-money trades, never deposits/withdraws real funds, and does not claim that technical indicators guarantee future price performance.
+A local macOS dashboard for equity and commodity option chains, paper positions, and technical analysis. The built-in markets are NIFTY and SENSEX under Equity, plus Gold Mini and Silver Mini under Commodity. The app runs locally and has no user accounts or admin login. Its source and configuration files are in `apps/tradex-desktop/`.
 
----
+## Run
 
-## 1. Overview & Architecture
-
-TradeX is a full-stack, production-quality Indian stock-market paper trading and technical analysis terminal designed to run seamlessly on **Vercel** with **Next.js (App Router)** and **PostgreSQL (via Prisma ORM)**.
-
-```
-Browser (React Client)
-   │ (Interactive Candlestick Charts, Option Chain Matrix, Paper Order Ticket, Portfolio)
-   ▼
-Next.js 14 App Router on Vercel
-   ├── Server Actions & Vercel Functions
-   ├── RBAC Middleware (ADMIN vs USER)
-   ├── Market Data Abstraction Layer (Live Provider Feed + Offline Dev Adapter)
-   ├── Multi-Factor Technical Indicator & Signal Engine
-   ├── Atomic Paper-Trading Execution Engine (Decimal Precision)
-   └── Immutable Fund Ledger & System Security Audit Trail
-   │
-   ▼
-PostgreSQL Database (Neon / Vercel Marketplace / Supabase / Self-hosted)
+```sh
+cd apps/tradex-desktop
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python app.py
 ```
 
----
+Open http://127.0.0.1:5000. Settings are saved to `apps/tradex-desktop/tradex_config.json`.
 
-## 2. Core Capabilities
+## Configure a source
 
-1. **Strict Market Data Integrity**:
-   - Live mode (`MARKET_DATA_MODE=live`): Retrieves genuine market data from licensed external feeds.
-   - If external feeds are unreachable or credentials are unconfigured, TradeX **strictly displays "Live market data unavailable"** and **NEVER generates fake market data**.
-   - Offline development mode (`MARKET_DATA_MODE=development`): An isolated development adapter is provided for local deterministic testing and unit tests.
-2. **Indian Market Hours & Calendar**:
-   - Accounts for NSE / BSE trading sessions (09:15 to 15:30 IST) in `Asia/Kolkata` time.
-   - Built-in exchange holiday calendar (Republic Day, Holi, Diwali, etc.) and weekend closures.
-3. **Modular Technical Analysis Engine**:
-   - **Trend**: SMA, EMA (20 & 50), Supertrend (ATR-based), ADX (+DI/-DI).
-   - **Momentum**: RSI (14, Wilder's smoothing), MACD (12, 26, 9), Stochastic Oscillator (%K, %D).
-   - **Volatility**: Bollinger Bands (Upper, Middle, Lower, Bandwidth), ATR (14).
-   - **Volume**: VWAP, OBV.
-   - **Explainable Multi-factor Scoring**: Deterministic score mapping to `BULLISH`, `BEARISH`, or `SIDEWAYS`, with `Weak`, `Moderate`, or `Strong` signal confidence and transparent indicator breakdown.
-4. **Options Chain Analysis (NIFTY 50 & SENSEX)**:
-   - Side-by-side Call (CE) and Put (PE) matrix around ATM strike.
-   - **Highest Observed Volume Strike** ("Volume Leader", explicitly labeled without buy recommendation).
-   - Put/Call Ratio (PCR) by Volume and Open Interest (OI).
-5. **Paper Trading Engine & Financial Math**:
-   - Buy & Sell support with Market and Limit orders.
-   - Exact financial decimal precision (`decimal.js`) preventing floating-point rounding errors.
-   - Weighted average cost accounting for multi-tranche purchases.
-   - Realized and Unrealized P&L mark-to-market calculations.
-   - Atomic database transactions (`prisma.$transaction`) ensuring cash deduction, trade persistence, and position updates occur simultaneously.
-6. **Immutable Virtual Capital Ledger**:
-   - `fund_transactions` table records all debits/credits (`INITIAL_ALLOCATION`, `TRADE_BUY`, `TRADE_SELL`, `ADMIN_CREDIT`, `ADMIN_DEBIT`) with `balanceBefore` and `balanceAfter`.
-7. **Two Isolated Portals & Role-Based Access Control (RBAC)**:
-   - **User Portal (`/dashboard`, `/stocks/[symbol]`, `/options/[symbol]`, `/portfolio`, `/orders`, `/watchlist`)**: Paper trading, charting, and portfolio tracking.
-   - **Admin Portal (`/admin`)**: User creation, virtual capital allocation, and system audit trail inspection. Normal users cannot access `/admin` or `/api/admin/*`.
+Add a market name, category, and an `http(s)` page URL. Gold Mini and Silver Mini are configured for Groww's MCX options pages with the supplied expiries and illiquid contracts excluded. The default extractor reads HTML table rows. For pages with a different layout, provide a CSS selector for each row and for its expiry, strike, call, and put values. The field selectors are evaluated inside each selected row. Exact strike values are comma-separated; leave them empty to include all available strikes. Expiry matching uses the exact visible text from the page.
 
----
+For JavaScript-rendered pages, enable **Read JavaScript-rendered rows with Chrome**. This uses Playwright and Google Chrome to read rendered option contract links and prices. TradeX reuses the live page and reloads it no more than once per minute. Groww's SENSEX chain is configured to use this mode.
 
-## 3. Technology Stack
+Many option-chain sites render data in JavaScript or require authenticated sessions. Browser mode needs Google Chrome available on the computer. It does not bypass login or access controls. Check the source site's terms and rate limits. Starting webscraping takes an immediate snapshot and then scans once per minute. It sends all strikes for the selected expiry to Google Sheets only; no local snapshot history is written.
 
-- **Framework**: Next.js 14 (App Router, Server Actions, Route Handlers)
-- **Language**: TypeScript 5
-- **Styling**: Tailwind CSS, Lucide React
-- **Database & ORM**: PostgreSQL with Prisma ORM
-- **Authentication**: Stateless JOSE HS256 JWT session cookies with bcryptjs password hashing
-- **Validation**: Zod
-- **Financial Math**: Decimal.js
-- **Testing**: Vitest
+## Google Sheets
 
----
+Create a Google service account, enable the Sheets API, and share the target spreadsheet with its service-account email. Enter the spreadsheet ID, worksheet tab name, and local JSON credentials path in Settings. The app creates the header if needed and appends every timestamped minute snapshot in one batch. Sheets reads and writes remain far below 60 requests per minute. Keep the credential file private. The dashboard shows the last successful Sheets write or the current Sheets error separately from source scraping errors. Failed writes are also recorded in `tradex.log` beside `app.py`. Install `requirements.txt` in the same Python environment used to launch TradeX.
 
-## 4. Setup & Local Development
+Use the dashboard **Start webscraping** toggle to take an immediate snapshot and then repeat once per minute. Each minute adds a timestamped row with one column per available contract to the configured worksheet. Switching it off stops scans, closes all Chrome pages TradeX opened for scraping, and shuts down the local TradeX server. Launch `TradeX.app` again to start another session.
 
-### Prerequisites
-- Node.js LTS (v20+ or v22+)
-- PostgreSQL database (e.g., [Neon Serverless Postgres](https://neon.tech), Supabase, or local PostgreSQL)
+On macOS, double-click `TradeX.app` to start the local backend with scraping off. Turn on **Backend scraping** in the small app window to start collection and open the dashboard in Google Chrome. Turning scraping off pauses collection while keeping the local API available to the toggle. Closing the app stops the backend. The installed app keeps its runtime and private service-account key under `~/Library/Application Support/TradeX`.
 
-### 1. Clone & Install Dependencies
-```bash
-npm install
-```
+This is a local prototype. Do not expose it directly to the internet; it has no user authentication.
 
-### 2. Configure Environment Variables
-Copy `.env.example` to `.env`:
-```bash
-cp .env.example .env
-```
+## Automatic technical analysis
 
-Set the variables:
-```ini
-# PostgreSQL connection string
-DATABASE_URL="postgresql://user:password@ep-cool-frost-123456.ap-southeast-1.aws.neon.tech/tradex?sslmode=require"
+Open **Technical Analysis** in the dashboard. The chart starts with Gold (`XAUUSDT`) and supports Silver (`XAGUSDT`), Bitcoin (`BTCUSDT`) and Ethereum (`ETHUSDT`). It reads public Binance USDⓈ-M Futures candles and current ticker prices, and offers 1m, 5m, 15m, 1h, 4h and 1d views. The candle API is documented at https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/market-data/rest-api/Kline-Candlestick-Data.
 
-# Minimum 32-character session encryption secret
-AUTH_SECRET="tradex_super_secret_session_jwt_key_at_least_32_chars_2026"
+The overlay detects closed-candle swing points, heuristic support and resistance zones, three-candle fair value gaps and mitigation, trendlines, impulse-origin supply/demand zones, and basic BOS/CHOCH events. Support and resistance have independent controls, alongside trendlines, FVGs, supply/demand, historical levels, structure breaks, and timeframe confluence. Analysis modes can focus on support, resistance, bullish scenarios, bearish scenarios, or the complete view. A forming candle is drawn separately and provisional FVGs remain dashed until confirmed. Pan by dragging and zoom with the scroll wheel. Hover candles and levels for details.
 
-# Market Data Mode: "development" for local offline testing, "live" for production feeds
-MARKET_DATA_MODE="development"
-MARKET_DATA_API_URL="https://query1.finance.yahoo.com"
-MARKET_DATA_API_KEY=""
+The live commentary describes detected trendline approaches, retests, rejections, and confirmed breaks. Conditional bullish and bearish scenarios state the trigger, required closing confirmation, invalidation level, and up to three targets drawn from stored levels and structures, with ATR projections labelled as such when no structural target is available. Evidence scores are heuristic rankings, not calibrated probabilities or guaranteed predictions. Commentary events and scenario outcomes are stored in the local database for later review. Market data is Binance USDⓈ-M Futures data; it does not represent MCX options or their premiums, so unsupported option levels are not presented as live data.
 
-# Admin seed credentials
-ADMIN_EMAIL="admin@tradex.local"
-ADMIN_PASSWORD="AdminSecurePassword123!"
-```
+The analyzer also backfills up to ten years of daily candles for the selected Binance USDⓈ-M Futures contract and uses the available long-term daily trend as one input to its live bullish and bearish evidence meters. Coverage depends on when each contract began trading; the interface reports the actual date range and marks shorter history. See Binance's [official kline documentation](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/market-data/rest-api/Kline-Candlestick-Data).
 
-### 3. Database Migration & Seeding
-```bash
-# Push schema to PostgreSQL
-npm run db:push
-
-# Seed admin and demo users with virtual capital
-npm run db:seed
-```
-
-### 4. Run Development Server
-```bash
-npm run dev
-```
-Open [http://localhost:3000](http://localhost:3000).
-
----
-
-## 5. Automated Verification & Testing
-
-Run all automated test suites (indicators, financial math, options analysis, market calendar, signal scoring):
-```bash
-npm test
-```
-
-Run TypeScript compilation verification:
-```bash
-npm run typecheck
-```
-
-Run ESLint checks:
-```bash
-npm run lint
-```
-
-Run production build:
-```bash
-npm run build
-```
-
----
-
-## 6. Vercel Deployment Guide
-
-1. **Create a PostgreSQL Database**:
-   - Provision a PostgreSQL database via Neon ([neon.tech](https://neon.tech)) or the Vercel Marketplace.
-2. **Deploy to Vercel**:
-   - Connect your GitHub repository to Vercel.
-   - Framework Preset: **Next.js**.
-   - Build Command: `prisma generate && next build` (configured in `package.json`).
-3. **Configure Environment Variables in Vercel**:
-   - `DATABASE_URL`: Your PostgreSQL connection string.
-   - `AUTH_SECRET`: A secure random 32+ character string.
-   - `MARKET_DATA_MODE`: Set to `live` for genuine market feeds.
-   - `ADMIN_EMAIL`: Admin email address.
-   - `ADMIN_PASSWORD`: Strong administrator password.
-4. **Run Migrations on Remote Database**:
-   ```bash
-   npx prisma db push
-   npx tsx prisma/seed.ts
-   ```
-
----
-
-## 7. Web Platform Demo Accounts
-
-These accounts apply only to the Next.js web platform described above. They do not apply to the macOS desktop scraper listed below, which has no login or admin account.
-
-- **Administrator**:
-  - Email: `admin@tradex.local`
-  - Password: `AdminSecurePassword123!`
-  - Portal: `/admin`
-- **Demo Trader**:
-  - Email: `user@tradex.local`
-  - Password: `UserSecurePassword123!`
-  - Portal: `/dashboard`
-
----
-
-## Desktop option-chain scraper
-
-The macOS TradeX desktop scraper and local options dashboard live in [`apps/tradex-desktop`](apps/tradex-desktop/README.md). It supports NIFTY, SENSEX, Gold Mini, and Silver Mini, local paper-position tracking, and technical analysis. This separate local application has no user accounts, admin login, or demo login credentials; the web platform accounts above cannot be used to sign in to it.
+Candle history, level reactions, level scores, breakout lifecycle and detected structures are stored in the existing `tradex_trades.sqlite3` database. In the packaged macOS app, this database is kept under `~/Library/Application Support/TradeX/data`. On each instrument's first analysis, TradeX warms all six timeframes so nearby historical levels can show timeframe confluence. Scoring weights can be overridden with the `TRADEX_TA_SCORING` JSON environment variable. Detection scores are heuristic and should be assessed against historical candles; they are not trade signals.
