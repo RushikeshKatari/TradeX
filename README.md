@@ -170,7 +170,9 @@ npm run build
 
 ---
 
-## 7. Demo Accounts
+## 7. Web Platform Demo Accounts
+
+These accounts apply only to the Next.js web platform described above. They do not apply to the macOS desktop scraper listed below, which has no login or admin account.
 
 - **Administrator**:
   - Email: `admin@tradex.local`
@@ -185,4 +187,4 @@ npm run build
 
 ## Desktop option-chain scraper
 
-The macOS TradeX desktop scraper and local options dashboard live in [`apps/tradex-desktop`](apps/tradex-desktop/README.md). It supports NIFTY, SENSEX, Gold Mini, and Silver Mini, local paper-position tracking, and technical analysis. The desktop app is a separate local application from this Next.js web platform.
+The macOS TradeX desktop scraper and local options dashboard live in [`apps/tradex-desktop`](apps/tradex-desktop/README.md). It supports NIFTY, SENSEX, Gold Mini, and Silver Mini, local paper-position tracking, and technical analysis. This separate local application has no user accounts, admin login, or demo login credentials; the web platform accounts above cannot be used to sign in to it.
