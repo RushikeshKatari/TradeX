@@ -21,9 +21,9 @@ final class TradeXApp: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        do { try startBackend() } catch { showError(error.localizedDescription) }
         buildWindow()
-        refreshState()
+        scrapingSwitch.state = .off
+        statusLabel.stringValue = "Backend is OFF"
         stateTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in self?.refreshState() }
     }
 
@@ -55,6 +55,7 @@ final class TradeXApp: NSObject, NSApplicationDelegate {
     }
 
     private func startBackend() throws {
+        if let backend = backend, backend.isRunning { return }
         guard let resources = Bundle.main.resourceURL else { throw NSError(domain: "TradeX", code: 1, userInfo: [NSLocalizedDescriptionKey: "App resources are missing."]) }
         let backendDir = resources.appendingPathComponent("backend", isDirectory: true)
         let python = resources.appendingPathComponent("runtime/bin/python")
@@ -82,8 +83,16 @@ final class TradeXApp: NSObject, NSApplicationDelegate {
         try logHandle.seekToEnd()
         process.standardOutput = logHandle
         process.standardError = logHandle
-        process.terminationHandler = { process in
-            try? "\nBackend exited with status \(process.terminationStatus)\n".write(to: backendLog, atomically: true, encoding: .utf8)
+        process.terminationHandler = { [weak self] terminated in
+            try? "\nBackend exited with status \(terminated.terminationStatus)\n".write(to: backendLog, atomically: true, encoding: .utf8)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if self.backend === terminated { self.backend = nil }
+                if !self.sendingToggle {
+                    self.scrapingSwitch?.state = .off
+                    self.statusLabel?.stringValue = "Backend is OFF"
+                }
+            }
         }
         try process.run()
         backend = process
@@ -94,32 +103,86 @@ final class TradeXApp: NSObject, NSApplicationDelegate {
         sendingToggle = true
         sender.isEnabled = false
         let enabled = sender.state == .on
-        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/scraping")!)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["enabled": enabled])
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.sendingToggle = false
-                sender.isEnabled = true
-                guard error == nil, let data = data,
-                      (response as? HTTPURLResponse)?.statusCode == 200,
-                      let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let actual = result["enabled"] as? Bool else {
-                    sender.state = enabled ? .off : .on
-                    self.statusLabel.stringValue = "Could not reach the backend"
-                    return
+        if enabled {
+            statusLabel.stringValue = "Starting backend…"
+            do {
+                try startBackend()
+                postJSON(path: "/api/scraping", body: ["enabled": true], retries: 40) { [weak self] data, response, error in
+                    guard let self = self else { return }
+                    let result = try? JSONSerialization.jsonObject(with: data ?? Data()) as? [String: Any]
+                    let actualEnabled = result?["enabled"] as? Bool ?? false
+                    let ok = error == nil && (response as? HTTPURLResponse)?.statusCode == 200 && actualEnabled
+                    DispatchQueue.main.async {
+                        self.sendingToggle = false
+                        sender.isEnabled = true
+                        guard ok else {
+                            sender.state = .off
+                            self.backend?.terminate()
+                            self.statusLabel.stringValue = "Could not start the backend"
+                            return
+                        }
+                        sender.state = .on
+                        self.statusLabel.stringValue = "Scraping is ON · opening dashboard in Chrome…"
+                        self.openDashboardInChrome()
+                    }
                 }
-                sender.state = actual ? .on : .off
-                if actual {
-                    self.statusLabel.stringValue = "Scraping is ON · opening dashboard in Chrome…"
-                    self.openDashboardInChrome()
-                } else {
-                    self.statusLabel.stringValue = "Scraping is OFF · backend is ready"
+            } catch {
+                sendingToggle = false
+                sender.isEnabled = true
+                sender.state = .off
+                statusLabel.stringValue = "Could not start the backend"
+                showError(error.localizedDescription)
+            }
+        } else {
+            statusLabel.stringValue = "Stopping backend…"
+            postJSON(path: "/api/shutdown", body: [:], retries: 0) { [weak self] _, _, _ in
+                guard let self = self else { return }
+                DispatchQueue.main.async {
+                    self.waitForBackendExit(attempt: 0) {
+                        self.sendingToggle = false
+                        sender.isEnabled = true
+                        sender.state = .off
+                        self.statusLabel.stringValue = self.backend?.isRunning == true
+                            ? "Backend did not stop · force stopping…"
+                            : "Scraping is OFF · backend stopped"
+                    }
                 }
             }
+        }
+    }
+
+    private func postJSON(path: String, body: [String: Any], retries: Int,
+                          completion: @escaping (Data?, URLResponse?, Error?) -> Void) {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)\(path)")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            let successful = error == nil && (response as? HTTPURLResponse)?.statusCode == 200
+            if !successful && retries > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self?.postJSON(path: path, body: body, retries: retries - 1, completion: completion)
+                }
+            } else {
+                completion(data, response, error)
+            }
         }.resume()
+    }
+
+    private func waitForBackendExit(attempt: Int, completion: @escaping () -> Void) {
+        guard let process = backend, process.isRunning else {
+            backend = nil
+            completion()
+            return
+        }
+        guard attempt < 40 else {
+            process.terminate()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { completion() }
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.waitForBackendExit(attempt: attempt + 1, completion: completion)
+        }
     }
 
     private func openDashboardInChrome() {
@@ -140,6 +203,7 @@ final class TradeXApp: NSObject, NSApplicationDelegate {
     }
 
     private func refreshState() {
+        guard backend?.isRunning == true else { return }
         guard let url = URL(string: "http://127.0.0.1:\(port)/api/state") else { return }
         URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
             guard let self = self, error == nil, (response as? HTTPURLResponse)?.statusCode == 200,

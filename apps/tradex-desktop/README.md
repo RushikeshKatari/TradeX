@@ -39,7 +39,7 @@ Create a Google service account, enable the Sheets API, and share the target spr
 
 Use the dashboard **Start webscraping** toggle to take an immediate snapshot and then repeat once per minute. Each minute adds a timestamped row with one column per available contract to the configured worksheet. Switching it off stops scans, closes all Chrome pages TradeX opened for scraping, and shuts down the local TradeX server. Launch `TradeX.app` again to start another session.
 
-On macOS, double-click `TradeX.app` to start the local backend with scraping off. Turn on **Backend scraping** in the small app window to start collection and open the dashboard in Google Chrome. Turning scraping off pauses collection while keeping the local API available to the toggle. Closing the app stops the backend. The installed app keeps its runtime and private service-account key under `~/Library/Application Support/TradeX`.
+On macOS, open `TradeX.app`; the backend starts only when you turn on **Backend scraping** in its small control window. Turning it on starts collection and opens the dashboard in Google Chrome. Turning the switch off stops collection and shuts down the local server. An already-open browser tab loses its connection until the switch is turned on again. Closing the app also stops the backend. The installed app keeps its runtime and settings under `~/Library/Application Support/TradeX`.
 
 This is a local prototype. Do not expose it directly to the internet; it has no user authentication.
 

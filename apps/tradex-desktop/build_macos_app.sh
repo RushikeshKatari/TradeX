@@ -10,8 +10,7 @@ if [[ ! -d "$RUNTIME" ]]; then
   exit 1
 fi
 CHROMIUM_EXECUTABLE="$(PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_CACHE" "$RUNTIME/bin/python" -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
-BROWSER_DIR="$(dirname "$(dirname "$CHROMIUM_EXECUTABLE")")"
-BROWSER_REVISION="$(basename "$BROWSER_DIR" | sed -E 's/^chromium(_headless_shell)?-//')"
+BROWSER_REVISION="$(printf '%s' "$CHROMIUM_EXECUTABLE" | sed -E 's#^.*/chromium(_headless_shell)?-([0-9]+)/.*$#\2#')"
 CHROMIUM="$PLAYWRIGHT_CACHE/chromium-$BROWSER_REVISION"
 HEADLESS_SHELL="$PLAYWRIGHT_CACHE/chromium_headless_shell-$BROWSER_REVISION"
 if [[ ! -d "$CHROMIUM" || ! -d "$HEADLESS_SHELL" ]]; then

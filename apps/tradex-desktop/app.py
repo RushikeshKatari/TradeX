@@ -1401,6 +1401,21 @@ def scraping_api():
     return jsonify(ok=True, enabled=scraping_enabled)
 
 
+@app.post("/api/shutdown")
+def shutdown_api():
+    """Stop scraping and the local server when the desktop app is switched off."""
+    global scraping_enabled
+    with lock:
+        scraping_enabled = False
+        state["running"] = False
+        state["scanning"] = False
+    force_scan_event.clear()
+    refresh_event.set()
+    log_event("TradeX backend shutdown requested")
+    threading.Thread(target=stop_local_server, daemon=True, name="shutdown-server").start()
+    return jsonify(ok=True)
+
+
 @app.post("/api/scan_all_charts")
 def api_scan_all_charts():
     def worker():

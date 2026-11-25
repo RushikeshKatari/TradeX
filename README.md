@@ -35,7 +35,7 @@ chmod +x install_macos.sh
 ./install_macos.sh
 ```
 
-The installer creates the Python runtime and Playwright browser, builds `TradeX.app`, installs it in `~/Applications/TradeX.app`, and opens it. To start it later, open **TradeX** from your Applications folder. The small **Backend scraping** switch starts and stops scraping; when switched on it opens the dashboard in your browser. Scraping starts off. The app's runtime, settings, logs, and analysis database are stored under `~/Library/Application Support/TradeX`.
+The installer creates the Python runtime and Playwright browser, builds `TradeX.app`, installs it in `~/Applications/TradeX.app`, and opens it. To start it later, open **TradeX** from your Applications folder. The small **Backend scraping** switch starts the local server and scraping, then opens the dashboard in Chrome. Turning the switch off stops scraping and shuts down the local server; an already-open browser tab will lose its connection until you switch it on again. Scraping starts off. The app's runtime, settings, logs, and analysis database are stored under `~/Library/Application Support/TradeX`.
 
 To rebuild the macOS app after updating the source, run `./install_macos.sh` again. The existing user settings and local data are kept in Application Support.
 
