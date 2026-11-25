@@ -1,45 +1,89 @@
-# TradeX Universal Options Chain Scraper
+# TradeX Desktop
 
-A local macOS dashboard for equity and commodity option chains, paper positions, and technical analysis. The built-in markets are NIFTY and SENSEX under Equity, plus Gold Mini and Silver Mini under Commodity. The app runs locally and has no user accounts or admin login. Its source and configuration files are in `apps/tradex-desktop/`.
+TradeX is a local desktop app for viewing equity and commodity option chains, managing paper positions, and exploring technical analysis charts. It supports NIFTY and SENSEX under Equity, and Gold Mini and Silver Mini under Commodity. It does not place real orders and has no user accounts or admin login.
 
-## Run
+The app runs on your computer and serves its dashboard only on the local machine. Windows and macOS setup scripts install the app and its Python dependencies; on Windows the installer adds a desktop shortcut, and on macOS it builds and installs `TradeX.app`.
+
+## Install on Windows
+
+Requirements: Windows 10 or 11, Git, and Python 3.11 or newer with the Python Launcher (`py`) enabled. The installer downloads the Playwright Chromium browser used for JavaScript-rendered option chains.
+
+Run these commands in PowerShell:
+
+```powershell
+git clone https://github.com/RushikeshKatari/TradeX.git
+cd TradeX\apps\tradex-desktop
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install_windows.ps1
+```
+
+The installer copies TradeX to `%LOCALAPPDATA%\Programs\TradeX`, creates a private Python environment, installs the required packages and Playwright Chromium, adds a `TradeX` shortcut to your desktop, and opens the dashboard. Double-click the shortcut to start TradeX later. The dashboard uses `http://127.0.0.1:5000` and your default browser. Use **Start webscraping** in the dashboard to begin scanning; scraping is off when the app starts.
+
+## Install on macOS
+
+Requirements: macOS 12 or newer, Git, Python 3.11 or newer, and Xcode Command Line Tools. The installer downloads the Playwright Chromium browser used for JavaScript-rendered option chains. Install the command-line tools once if needed:
+
+```sh
+xcode-select --install
+```
+
+Then run these commands in Terminal:
+
+```sh
+git clone https://github.com/RushikeshKatari/TradeX.git
+cd TradeX/apps/tradex-desktop
+chmod +x install_macos.sh
+./install_macos.sh
+```
+
+The installer creates the Python runtime and Playwright browser, builds `TradeX.app`, installs it in `~/Applications/TradeX.app`, and opens it. To start it later, open **TradeX** from your Applications folder. The small **Backend scraping** switch starts and stops scraping; when switched on it opens the dashboard in your browser. Scraping starts off. The app's runtime, settings, logs, and analysis database are stored under `~/Library/Application Support/TradeX`.
+
+To rebuild the macOS app after updating the source, run `./install_macos.sh` again. The existing user settings and local data are kept in Application Support.
+
+## Use the dashboard
+
+- **Option chains:** Choose an equity or commodity instrument, expiry, and strikes. Leave exact strikes blank to load all available strikes.
+- **Paper positions:** Add option legs to positions, edit entries, and use Exit Trade to record completed paper trades locally.
+- **Technical Analysis:** View live Binance USDⓈ-M Futures charts for Gold, Silver, Bitcoin, and Ethereum across six timeframes. The analyzer includes support and resistance, structures, historical levels, a live commentary panel, and bullish/bearish evidence meters.
+- **Scraping:** A scan runs immediately when started and repeats every minute. The Windows dashboard's **Start webscraping** control and macOS app's **Backend scraping** switch start scraping; scraping is off after launch.
+
+Technical analysis scores are heuristic evidence summaries, not calibrated probabilities or guaranteed predictions. Its Binance futures charts are separate from MCX option prices. For detailed configuration and feature notes, see [the desktop app guide](apps/tradex-desktop/README.md).
+
+## Configure data sources and Google Sheets
+
+The app includes NIFTY, SENSEX, Gold Mini, and Silver Mini sources. In Settings, you can choose an expiry and adjust a source URL or selectors. JavaScript-rendered sources use the Playwright Chromium browser installed by the setup script; a separate Google Chrome installation is not required for option-chain scraping. The dashboard opens in your default browser. TradeX does not bypass a source site's login, access controls, or terms of use.
+
+Google Sheets publishing is optional. Create a Google service account, enable the Sheets API, share the spreadsheet with the service-account email, then enter the spreadsheet ID, worksheet name, and local credentials JSON path in Settings. Keep that credential file private. Local settings are not committed to the repository.
+
+## Install scripts and source run
+
+- Windows installer and launcher: [`install_windows.ps1`](apps/tradex-desktop/install_windows.ps1), [`Start-TradeX.ps1`](apps/tradex-desktop/Start-TradeX.ps1)
+- macOS installer: [`install_macos.sh`](apps/tradex-desktop/install_macos.sh)
+- macOS app builder: [`build_macos_app.sh`](apps/tradex-desktop/build_macos_app.sh)
+
+For development, run TradeX directly from `apps/tradex-desktop` after installing Python 3.11+:
+
+macOS/Linux:
 
 ```sh
 cd apps/tradex-desktop
 python3 -m venv .venv
-source .venv/bin/activate
+. .venv/bin/activate
 pip install -r requirements.txt
+python -m playwright install chromium
 python app.py
 ```
 
-Open http://127.0.0.1:5000. Settings are saved to `apps/tradex-desktop/tradex_config.json`.
+Windows PowerShell:
 
-## Configure a source
+```powershell
+cd apps\tradex-desktop
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -m playwright install chromium
+python app.py
+```
 
-Add a market name, category, and an `http(s)` page URL. Gold Mini and Silver Mini are configured for Groww's MCX options pages with the supplied expiries and illiquid contracts excluded. The default extractor reads HTML table rows. For pages with a different layout, provide a CSS selector for each row and for its expiry, strike, call, and put values. The field selectors are evaluated inside each selected row. Exact strike values are comma-separated; leave them empty to include all available strikes. Expiry matching uses the exact visible text from the page.
+Then open `http://127.0.0.1:5000` in your browser.
 
-For JavaScript-rendered pages, enable **Read JavaScript-rendered rows with Chrome**. This uses Playwright and Google Chrome to read rendered option contract links and prices. TradeX reuses the live page and reloads it no more than once per minute. Groww's SENSEX chain is configured to use this mode.
-
-Many option-chain sites render data in JavaScript or require authenticated sessions. Browser mode needs Google Chrome available on the computer. It does not bypass login or access controls. Check the source site's terms and rate limits. Starting webscraping takes an immediate snapshot and then scans once per minute. It sends all strikes for the selected expiry to Google Sheets only; no local snapshot history is written.
-
-## Google Sheets
-
-Create a Google service account, enable the Sheets API, and share the target spreadsheet with its service-account email. Enter the spreadsheet ID, worksheet tab name, and local JSON credentials path in Settings. The app creates the header if needed and appends every timestamped minute snapshot in one batch. Sheets reads and writes remain far below 60 requests per minute. Keep the credential file private. The dashboard shows the last successful Sheets write or the current Sheets error separately from source scraping errors. Failed writes are also recorded in `tradex.log` beside `app.py`. Install `requirements.txt` in the same Python environment used to launch TradeX.
-
-Use the dashboard **Start webscraping** toggle to take an immediate snapshot and then repeat once per minute. Each minute adds a timestamped row with one column per available contract to the configured worksheet. Switching it off stops scans, closes all Chrome pages TradeX opened for scraping, and shuts down the local TradeX server. Launch `TradeX.app` again to start another session.
-
-On macOS, double-click `TradeX.app` to start the local backend with scraping off. Turn on **Backend scraping** in the small app window to start collection and open the dashboard in Google Chrome. Turning scraping off pauses collection while keeping the local API available to the toggle. Closing the app stops the backend. The installed app keeps its runtime and private service-account key under `~/Library/Application Support/TradeX`.
-
-This is a local prototype. Do not expose it directly to the internet; it has no user authentication.
-
-## Automatic technical analysis
-
-Open **Technical Analysis** in the dashboard. The chart starts with Gold (`XAUUSDT`) and supports Silver (`XAGUSDT`), Bitcoin (`BTCUSDT`) and Ethereum (`ETHUSDT`). It reads public Binance USDⓈ-M Futures candles and current ticker prices, and offers 1m, 5m, 15m, 1h, 4h and 1d views. The candle API is documented at https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/market-data/rest-api/Kline-Candlestick-Data.
-
-The overlay detects closed-candle swing points, heuristic support and resistance zones, three-candle fair value gaps and mitigation, trendlines, impulse-origin supply/demand zones, and basic BOS/CHOCH events. Support and resistance have independent controls, alongside trendlines, FVGs, supply/demand, historical levels, structure breaks, and timeframe confluence. Analysis modes can focus on support, resistance, bullish scenarios, bearish scenarios, or the complete view. A forming candle is drawn separately and provisional FVGs remain dashed until confirmed. Pan by dragging and zoom with the scroll wheel. Hover candles and levels for details.
-
-The live commentary describes detected trendline approaches, retests, rejections, and confirmed breaks. Conditional bullish and bearish scenarios state the trigger, required closing confirmation, invalidation level, and up to three targets drawn from stored levels and structures, with ATR projections labelled as such when no structural target is available. Evidence scores are heuristic rankings, not calibrated probabilities or guaranteed predictions. Commentary events and scenario outcomes are stored in the local database for later review. Market data is Binance USDⓈ-M Futures data; it does not represent MCX options or their premiums, so unsupported option levels are not presented as live data.
-
-The analyzer also backfills up to ten years of daily candles for the selected Binance USDⓈ-M Futures contract and uses the available long-term daily trend as one input to its live bullish and bearish evidence meters. Coverage depends on when each contract began trading; the interface reports the actual date range and marks shorter history. See Binance's [official kline documentation](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/market-data/rest-api/Kline-Candlestick-Data).
-
-Candle history, level reactions, level scores, breakout lifecycle and detected structures are stored in the existing `tradex_trades.sqlite3` database. In the packaged macOS app, this database is kept under `~/Library/Application Support/TradeX/data`. On each instrument's first analysis, TradeX warms all six timeframes so nearby historical levels can show timeframe confluence. Scoring weights can be overridden with the `TRADEX_TA_SCORING` JSON environment variable. Detection scores are heuristic and should be assessed against historical candles; they are not trade signals.
+TradeX is a local prototype with no authentication. Do not expose its local server to the internet or a shared network. Keep credentials and local trade data on your device.

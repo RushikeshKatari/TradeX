@@ -1439,7 +1439,7 @@ def shutdown_when_dashboard_closes(server: Any) -> None:
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
-    server = make_server("0.0.0.0", port, app, threaded=True)
+    server = make_server("127.0.0.1", port, app, threaded=True)
     http_server = server
     poller = threading.Thread(target=poll_loop, daemon=True)
     sheets_worker = threading.Thread(target=sheets_loop, daemon=True)

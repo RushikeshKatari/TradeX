@@ -2,14 +2,26 @@
 
 A local dashboard for equity and commodity option chains, selecting exact strikes and expiries, and optionally publishing matches to Google Sheets. The built-in markets are NIFTY and SENSEX under Equity, plus Gold Mini and Silver Mini under Commodity.
 
+## Install the desktop app
+
+Use the repository root README for complete Windows and macOS installation commands. In short:
+
+- **Windows:** Run `powershell -NoProfile -ExecutionPolicy Bypass -File .\install_windows.ps1` from this folder. It installs to `%LOCALAPPDATA%\Programs\TradeX`, creates a desktop shortcut, and opens the local dashboard.
+- **macOS:** Run `chmod +x install_macos.sh && ./install_macos.sh` from this folder. It builds and installs `~/Applications/TradeX.app`. The existing `build_macos_app.sh` remains available for rebuilding the app bundle after preparing its runtime.
+
+Both installers require Python 3.11 or newer. macOS app packaging also requires Xcode Command Line Tools.
+
 ## Run
 
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python -m playwright install chromium
 python app.py
 ```
+
+In Windows PowerShell, use `py -3 -m venv .venv`, then `.\.venv\Scripts\Activate.ps1`, followed by `python -m pip install -r requirements.txt`, `python -m playwright install chromium`, and `python app.py`.
 
 Open http://127.0.0.1:5000. Settings are saved to `tradex_config.json` in this folder.
 
@@ -17,9 +29,9 @@ Open http://127.0.0.1:5000. Settings are saved to `tradex_config.json` in this f
 
 Add a market name, category, and an `http(s)` page URL. Gold Mini and Silver Mini are configured for Groww's MCX options pages with the supplied expiries and illiquid contracts excluded. The default extractor reads HTML table rows. For pages with a different layout, provide a CSS selector for each row and for its expiry, strike, call, and put values. The field selectors are evaluated inside each selected row. Exact strike values are comma-separated; leave them empty to include all available strikes. Expiry matching uses the exact visible text from the page.
 
-For JavaScript-rendered pages, enable **Read JavaScript-rendered rows with Chrome**. This uses Playwright and Google Chrome to read rendered option contract links and prices. TradeX reuses the live page and reloads it no more than once per minute. Groww's SENSEX chain is configured to use this mode.
+For JavaScript-rendered pages, enable **Read JavaScript-rendered rows with Chrome**. This uses Playwright's installed Chromium browser to read rendered option contract links and prices. TradeX reuses the page and reloads it no more than once per minute. Groww's SENSEX chain is configured to use this mode. A separate Google Chrome installation is not required for option-chain scraping.
 
-Many option-chain sites render data in JavaScript or require authenticated sessions. Browser mode needs Google Chrome available on the computer. It does not bypass login or access controls. Check the source site's terms and rate limits. Starting webscraping takes an immediate snapshot and then scans once per minute. It sends all strikes for the selected expiry to Google Sheets only; no local snapshot history is written.
+Many option-chain sites render data in JavaScript or require authenticated sessions. Browser mode uses the Playwright Chromium browser installed by the setup scripts. It does not bypass login or access controls. Check the source site's terms and rate limits. Starting webscraping takes an immediate snapshot and then scans once per minute. It sends all strikes for the selected expiry to Google Sheets only; no local snapshot history is written.
 
 ## Google Sheets
 
