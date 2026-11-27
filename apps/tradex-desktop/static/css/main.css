@@ -1347,6 +1347,8 @@ td.spot-divider-td {
   font-weight: 700;
   font-size: 11px;
 }
+.pnl-spot-live-state { margin-left:2px; padding:2px 5px; border-radius:4px; color:#a7f3d0; background:rgba(16,185,129,.13); font:800 8px Inter,sans-serif; letter-spacing:.04em; }
+.pnl-strike-underlying-move { margin:0 0 7px; font:700 10px 'JetBrains Mono',monospace; }
 .backend-scrape-toggle {
   border: 1px solid rgba(148, 163, 184, .38);
   border-radius: 999px;

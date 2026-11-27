@@ -1408,6 +1408,7 @@ function copyPositionSymbols(id) {
 
 function renderStrategyPackPanel(p) {
   const lotSize = pnlLotSize(p);
+  const liveSpot = pnlLiveSpot(p);
   let packInvested = 0;
   let packCurrentVal = 0;
   let totalLots = 0;
@@ -1501,6 +1502,10 @@ function renderStrategyPackPanel(p) {
           </div>
         </div>
 
+        <div class="pnl-strike-underlying-move" style="color:${liveSpot - Number(l.strike) >= 0 ? '#10b981' : '#f43f5e'};">
+          ${liveSpot > 0 ? `Spot − strike: ${liveSpot - Number(l.strike) > 0 ? '+' : liveSpot - Number(l.strike) < 0 ? '−' : ''}₹${formatMoney(Math.abs(liveSpot - Number(l.strike)))} (${(liveSpot - Number(l.strike)) > 0 ? '+' : ''}${((liveSpot - Number(l.strike)) / Number(l.strike) * 100).toFixed(2)}%)` : 'Spot − strike: —'}
+        </div>
+
         <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-dim); border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 6px;">
           <div>Invested: <strong>₹${formatMoney(l.legInvest)}</strong> · Value: <strong style="color: #fff;">₹${formatMoney(l.legVal)}</strong></div>
           <div style="display: flex; gap: 6px;">
@@ -1516,16 +1521,32 @@ function renderStrategyPackPanel(p) {
   ensurePnlFullChain(p);
   const fullChain = pnlFullChainCache.get(pnlFullChainKey(p));
   let chainRows = (fullChain?.rows ?? (latestState?.rows || []).filter(r => String(r.index).toUpperCase() === String(p.index).toUpperCase() && (!p.expiry || String(r.expiry) === String(p.expiry)))).slice();
-  const liveSpot = pnlLiveSpot(p);
   const liveAtmStrike = pnlAtmStrike(p, chainRows);
   const hasLiveChainRows = chainRows.length > 0;
   const spotDetails = latestState?.underlying_details?.[p.index]
     || latestState?.underlying_details?.[String(p.index || '').toUpperCase()] || {};
-  const spotDayChange = Number(spotDetails.day_change);
+  const spotDayChangeRaw = Number(spotDetails.day_change);
+  const spotDayChangePercRaw = Number(spotDetails.day_change_perc);
+  const spotDayChange = Number.isFinite(spotDayChangeRaw) ? spotDayChangeRaw : 0;
+  const spotDayChangePerc = Number.isFinite(spotDayChangePercRaw) ? spotDayChangePercRaw : 0;
   const spotIsLive = pnlQuoteIsLive(spotDetails.updated_at || '');
-  const spotMoveLabel = Number.isFinite(spotDayChange) && spotDayChange !== 0
-    ? `${spotDayChange > 0 ? '+' : '−'}₹${formatMoney(Math.abs(spotDayChange))}` : '₹0';
-  const spotMarker = liveSpot ? '──────' : '────── (Spot quote unavailable) ──────';
+  const spotChangeSign = spotDayChange > 0 ? '+' : '';
+  const spotChangeLabel = `${spotChangeSign}${spotDayChange.toFixed(2)} (${spotChangeSign}${spotDayChangePerc.toFixed(2)}%)`;
+  const spotFormatted = liveSpot.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const spotChangeClass = spotDayChange >= 0 ? 'positive' : 'negative';
+  const spotLineHtml = `
+    <tr class="spot-divider-tr pnl-spot-divider-row" data-pnl-spot-marker="true">
+      <td colspan="3" class="spot-divider-td">
+        <div class="spot-divider-wrapper">
+          <div class="spot-line left ${spotChangeClass}"></div>
+          <div class="spot-price-pill ${spotChangeClass}" title="${spotIsLive ? 'Live underlying price' : 'Last known underlying price'}">
+            <span class="spot-price-num">₹${spotFormatted}</span><span class="spot-price-sep">|</span>
+            <span class="spot-price-change">${spotChangeLabel}</span><span class="pnl-spot-live-state">${spotIsLive ? 'LIVE' : 'LAST'}</span>
+          </div>
+          <div class="spot-line right ${spotChangeClass}"></div>
+        </div>
+      </td>
+    </tr>`;
 
   // Keep every invested strike in the matrix even when the live feed omits
   // that strike (for example during a partial refresh or on a different expiry).
@@ -1550,7 +1571,7 @@ function renderStrategyPackPanel(p) {
 
   const filterInput = `
     <div style="margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
-      <div style="font-size: 12px; font-weight: 700; color: #38bdf8;">📊 Option Chain · ${pnlQuoteIsLive() ? '<span style="color:#10b981">LIVE</span>' : '<span style="color:#fbbf24">LAST QUOTE</span>'} · ${esc(p.expiry || 'Latest')}<small style="display:block;margin-top:3px;color:var(--text-dim);font-weight:500;">Auto-centers invested strikes once per hour · prices update while Backend scraping is on</small>${fullChain && !fullChain.fullChain ? '<small style="display:block;margin-top:3px;color:#fbbf24;font-weight:500;">Cached subset shown · turn on backend scraping to load all strikes</small>' : ''}</div>
+      <div style="font-size: 12px; font-weight: 700; color: #38bdf8;">📊 Option Chain · ${pnlQuoteIsLive() ? '<span style="color:#10b981">LIVE</span>' : '<span style="color:#fbbf24">LAST QUOTE</span>'} · ${esc(p.expiry || 'Latest')}<small style="display:block;margin-top:3px;color:var(--text-dim);font-weight:500;">Centers on current price once per hour · spot divider floats between strikes</small>${fullChain && !fullChain.fullChain ? '<small style="display:block;margin-top:3px;color:#fbbf24;font-weight:500;">Cached subset shown · turn on backend scraping to load all strikes</small>' : ''}</div>
       <div style="display: flex; align-items: center; gap: 8px;">
         <span style="font-size: 10px; color: var(--text-dim);">${shownLen} of ${totalChainLen} strikes</span>
         <input type="text" placeholder="Filter strikes…" value="${esc(query)}"
@@ -1563,9 +1584,14 @@ function renderStrategyPackPanel(p) {
 
   const chainScrollId = `pnl-chain-scroll-${p.id}`;
   let rowsHtml = '';
+  let spotMarkerInserted = false;
   if (visibleChainRows.length) {
     visibleChainRows.forEach(r => {
       const strike = Number(r.strike);
+      if (!spotMarkerInserted && liveSpot > 0 && !query && strike > liveSpot) {
+        rowsHtml += spotLineHtml;
+        spotMarkerInserted = true;
+      }
       const ceLeg = legsData.find(l => Number(l.strike) === strike && l.type === 'CE');
       const peLeg = legsData.find(l => Number(l.strike) === strike && l.type === 'PE');
       // Search filters the surrounding live quotes, but never hides an
@@ -1628,7 +1654,7 @@ function renderStrategyPackPanel(p) {
       const strikeTag = ceLeg ? ceLeg.label : (peLeg ? peLeg.label : (isAtm ? 'CENTER ATM' : ''));
 
       rowsHtml += `
-        <tr ${isInvested ? 'data-invested-row="true"' : ''} style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+        <tr data-strike="${strike}" ${isAtm ? 'data-current-atm-row="true"' : ''} ${isInvested ? 'data-invested-row="true"' : ''} style="border-bottom: 1px solid rgba(255,255,255,0.04);">
           <td class="${ceLeg ? 'chain-invested-cell-call' : ''}" style="padding: 7px 10px; font-family: 'JetBrains Mono', monospace;">
             ${callCell}
           </td>
@@ -1642,13 +1668,13 @@ function renderStrategyPackPanel(p) {
         </tr>
       `;
     });
+    if (!spotMarkerInserted && liveSpot > 0 && !query) rowsHtml += spotLineHtml;
   } else {
     rowsHtml = `<tr><td colspan="3" style="text-align: center; padding: 24px; color: var(--text-muted);">No chain quotes available for this expiry.</td></tr>`;
   }
 
   const chainTableHtml = `
       <div style="background: rgba(14, 22, 38, 0.5); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px; height: 100%;">
-      <div title="${spotIsLive ? 'Live underlying price and session change' : 'Last known underlying price and session change'}" style="text-align:center;margin:0 0 10px;padding:8px 6px;border-radius:6px;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.18);font:700 12px 'JetBrains Mono',monospace;color:#bae6fd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${spotMarker}${liveSpot ? `<span style="color:#fff;"> ₹${formatMoney(liveSpot)} (${spotMoveLabel}) </span>${spotIsLive ? '<span style="color:#10b981;font:700 10px Inter,sans-serif;">LIVE</span>' : '<span style="color:#fbbf24;font:700 10px Inter,sans-serif;">LAST</span>'}` : ''}</div>
       ${filterInput}
       <div id="${chainScrollId}" data-has-live-rows="${hasLiveChainRows}" style="max-height: ${chainViewportHeight}px; overflow-y: auto; border: 1px solid rgba(255,255,255,0.06); border-radius: 6px;">
         <table class="data-table" style="width: 100%; margin: 0; font-size: 12px;">
@@ -1685,7 +1711,7 @@ function renderStrategyPackPanel(p) {
             <div style="display: flex; gap: 8px; font-size: 11px; color: var(--text-muted); align-items: center; flex-wrap: wrap;">
               <span>Expiry: <strong style="color: #fbbf24;">${esc(p.expiry || 'Latest')}</strong></span>
               <span>·</span>
-              <span title="${spotIsLive ? 'Live underlying quote' : 'Last known underlying quote'}">Spot: <strong style="color: #fff;">₹${liveSpot ? formatMoney(liveSpot) : '—'}</strong>${Number.isFinite(spotDayChange) && spotDayChange !== 0 ? `<strong style="color:${spotDayChange > 0 ? '#10b981' : '#f43f5e'};"> (${spotDayChange > 0 ? '+' : '−'}₹${formatMoney(Math.abs(spotDayChange))})</strong>` : ''}<small style="color:${spotIsLive ? '#10b981' : '#fbbf24'};font-weight:700;">${spotIsLive ? ' LIVE' : (liveSpot ? ' LAST' : ' OFFLINE')}</small></span>
+              <span title="${spotIsLive ? 'Live underlying quote' : 'Last known underlying quote'}">Spot: <strong style="color: #fff;">₹${liveSpot ? spotFormatted : '—'}</strong>${liveSpot ? `<strong style="color:${spotDayChange >= 0 ? '#10b981' : '#f43f5e'};"> | ${spotChangeLabel}</strong>` : ''}<small style="color:${spotIsLive ? '#10b981' : '#fbbf24'};font-weight:700;">${spotIsLive ? ' LIVE' : (liveSpot ? ' LAST' : ' OFFLINE')}</small></span>
               <span>·</span>
               <span>ATM: <strong style="color: #fbbf24;">${liveAtmStrike || '—'}</strong></span>
               <span>·</span>
@@ -1976,8 +2002,8 @@ function renderPnl(force = true) {
   });
   updatePnlSummary(totalUnrealizedPnl, totalInvested, pnlPositions.length, targetsHitCount);
 
-  // Re-center each Position PnL chain at most once an hour. Normal live
-  // polling preserves the user's current position between re-centers.
+  // Center each Position PnL chain on the live spot divider at most once an
+  // hour. Normal quote polling preserves the user's current scroll position.
   requestAnimationFrame(() => {
     setTimeout(() => {
       pnlPositions.forEach(p => {
@@ -1985,20 +2011,22 @@ function renderPnl(force = true) {
           || Number(p.callStrike) > 0 || Number(p.putStrike) > 0;
         if (!hasPositionLegs) return;
         const scrollContainer = document.getElementById(`pnl-chain-scroll-${p.id}`);
-        const investedRows = scrollContainer?.querySelectorAll('[data-invested-row="true"]');
-        if (investedRows?.length && scrollContainer?.dataset.hasLiveRows === 'true'
+        const spotMarker = scrollContainer?.querySelector('[data-pnl-spot-marker="true"]');
+        const atmRow = scrollContainer?.querySelector('[data-current-atm-row="true"]');
+        const centerTarget = spotMarker || atmRow;
+        if (centerTarget && scrollContainer?.dataset.hasLiveRows === 'true'
             && scrollContainer.clientHeight > 0 && scrollContainer.getClientRects().length) {
-          const cooldownKey = `tradex.pnlChainRecenterAt.v3.${p.id}`;
+          const cooldownKey = `tradex.pnlChainRecenterAt.v4.${p.id}`;
           const lastRecenter = Number(localStorage.getItem(cooldownKey) || 0);
           if (Date.now() - lastRecenter < PNL_CHAIN_RECENTER_COOLDOWN_MS) return;
 
-          // Center the full invested-strike span, not just its first row.
-          const first = investedRows[0].getBoundingClientRect();
-          const last = investedRows[investedRows.length - 1].getBoundingClientRect();
+          // Put the current underlying quote, between its neighboring strikes,
+          // at the vertical center of this card's scroll viewport.
+          const targetRect = centerTarget.getBoundingClientRect();
           const containerRect = scrollContainer.getBoundingClientRect();
-          if (first.height <= 0 || last.height <= 0 || scrollContainer.scrollHeight <= scrollContainer.clientHeight) return;
-          const investedCenter = (first.top + last.bottom) / 2;
-          const delta = investedCenter - (containerRect.top + scrollContainer.clientHeight / 2);
+          if (targetRect.height <= 0 || scrollContainer.scrollHeight <= scrollContainer.clientHeight) return;
+          const targetCenter = (targetRect.top + targetRect.bottom) / 2;
+          const delta = targetCenter - (containerRect.top + scrollContainer.clientHeight / 2);
           const maxScroll = scrollContainer.scrollHeight - scrollContainer.clientHeight;
           const previousScrollTop = scrollContainer.scrollTop;
           const nextScrollTop = Math.max(0, Math.min(maxScroll, previousScrollTop + delta));
