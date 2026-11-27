@@ -6,7 +6,7 @@
   const TROY_OUNCE_GRAMS = 31.1034768;
   const TF_MS = { '1m':60000, '5m':300000, '15m':900000, '30m':1800000, '1h':3600000, '4h':14400000, '6h':21600000, '12h':43200000, '1d':86400000 };
   const TF_ORDER = Object.keys(TF_MS);
-  const state = { source: [], candles: [], daily: [], sessions: {}, exchange: 'bybit', timeframe: '1m', currency: 'USD', rate: 0, indiaAdjustment: 14.1225, multiplier: 0, ticker: null, info: null, activeView: 'overview', sessionFilter: 'All Sessions', csvName: '', loading: false, queuedGenerate: false, liveMode: false, liveLoading: false, workloadEnabled: false };
+  const state = { source: [], candles: [], daily: [], sessions: {}, exchange: 'bybit', timeframe: '1m', currency: 'USD', rate: 0, indiaAdjustment: 14.1225, multiplier: 0, ticker: null, info: null, activeView: 'overview', sessionFilter: 'All Sessions', csvName: '', loading: false, queuedGenerate: false, liveMode: false, liveLoading: false, workloadEnabled: false, mcxSyncLoading: false };
   const istDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year:'numeric', month:'2-digit', day:'2-digit' });
   const istTimeFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour:'2-digit', minute:'2-digit', second:'2-digit', hourCycle:'h23' });
   const fmt = (n, digits=2) => Number(n).toLocaleString(state.currency === 'INR' ? 'en-IN' : 'en-US', {minimumFractionDigits:digits, maximumFractionDigits:digits});
@@ -48,7 +48,9 @@
     const button=$('glLiveToggle');
     if(button){button.classList.toggle('active',state.liveMode);button.setAttribute('aria-pressed',String(state.liveMode));button.textContent=state.liveMode?'● Live mode · ON':'● Live mode · OFF';}
     $('glHistoryControls')?.classList.toggle('is-hidden',state.liveMode);
-    $('glTimeframeControls')?.classList.toggle('is-hidden',state.liveMode);
+    // Timeframe selection remains available in Live mode so users can change
+    // the live candle interval without leaving the chart.
+    $('glTimeframeControls')?.classList.remove('is-hidden');
     if(enabled&&!state.workloadEnabled){setStatus('Gold Liquidity is paused. Turn it on in Data Workloads before requesting live prices.','warning');return;}
     if(enabled&&!state.liveMode){setStatus('Live Mode needs an exchange source. Select Bybit, OKX, Binance, or Gate.io; uploaded CSV data has no live feed.','warning');return;}
     if(state.liveMode){setStatus('Live Mode is on. Current exchange candles and ticker will refresh while this tab is open.','success');if(!state.candles.length&&!state.loading)generate();else refreshLive();}
@@ -65,6 +67,28 @@
       setStatus(`USD/INR auto rate refreshed from ${data.source} · ${data.updated_at||'latest'}. You can edit the rate manually.`, 'success');
     } catch(e) { setStatus(`FX auto-refresh unavailable: ${e.message}. Enter a USD/INR rate manually to use INR mode.`, 'warning'); }
     finally { if(b) b.disabled=false; }
+  }
+  async function refreshIndiaAdjustment() {
+    if(!state.workloadEnabled||state.mcxSyncLoading)return;
+    const button=$('glMcxSync'),status=$('glIndiaAdjustmentStatus');
+    state.mcxSyncLoading=true;if(button)button.disabled=true;
+    if(status)status.textContent='Syncing Groww MCX Gold Mini…';
+    try {
+      const response=await fetch('/api/gold-liquidity/india-adjustment',{cache:'no-store'});
+      const data=await response.json();if(!response.ok)throw new Error(data.error||'MCX adjustment sync failed');
+      const adjustment=Number(data.adjustment_percent),rate=Number(data.fx?.rate);
+      if(!Number.isFinite(adjustment)||!Number.isFinite(rate)||rate<=0)throw new Error('Groww, XAUUSD, or USD/INR returned an invalid quote');
+      $('glIndiaAdjustment').value=adjustment.toFixed(4);$('glFxRate').value=rate.toFixed(4);
+      updateMultiplier();renderAll();
+      const growwPrice=Number(data.groww.price).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+      const spotPrice=Number(data.spot.price).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+      const age=data.groww.updated_at?` · Groww quote ${istDateTime(new Date(data.groww.updated_at).getTime())}`:'';
+      if(status)status.textContent=`Groww MCX ₹${growwPrice}/10g · XAU $${spotPrice}/oz · USD/INR ${rate.toFixed(4)} · adjustment ${adjustment>=0?'+':''}${adjustment.toFixed(4)}%${age}`;
+      if(status)status.title=`${data.groww.contract||'MCX Gold Mini'} · fair converted value ₹${Number(data.fair_inr_per_10g).toLocaleString('en-IN',{maximumFractionDigits:2})}/10g · Source: Groww, Bybit XAUUSDT, ${data.fx.source}`;
+    } catch(error) {
+      if(status)status.textContent=`MCX sync unavailable · using saved adjustment${state.indiaAdjustment>=0?'+':''}${state.indiaAdjustment.toFixed(4)}%`;
+      if(status)status.title=error.message;
+    } finally {state.mcxSyncLoading=false;if(button)button.disabled=false;}
   }
   function showView(name) {
     state.activeView=name;
@@ -392,7 +416,7 @@
       setStatus('Gold Liquidity is paused. Turn it on in Data Workloads to request exchange data.','warning');
       return;
     }
-    refreshFx();
+    refreshIndiaAdjustment();
     if(!wasEnabled){
       if(localStorage.getItem('tradex.goldLiquidity.liveMode')==='true')setLiveMode(true);
       else if(!state.candles.length&&!state.loading)generate();
@@ -410,11 +434,12 @@
     $('glLiveToggle').addEventListener('click',()=>setLiveMode(!state.liveMode));
     setLiveMode(false);
     renderTimeframeButtons();
-    $('glGenerate').addEventListener('click',generate);$('glFxRate').addEventListener('input',()=>{updateMultiplier();renderAll();});$('glIndiaAdjustment').addEventListener('input',()=>{updateMultiplier();renderAll();});$('glFxRefresh').addEventListener('click',refreshFx);$('glDstMode').addEventListener('change',()=>{renderSessions();renderLiveStrip();});
+    $('glGenerate').addEventListener('click',generate);$('glFxRate').addEventListener('input',()=>{updateMultiplier();renderAll();});$('glIndiaAdjustment').addEventListener('input',()=>{updateMultiplier();renderAll();});$('glFxRefresh').addEventListener('click',refreshFx);$('glMcxSync').addEventListener('click',refreshIndiaAdjustment);$('glDstMode').addEventListener('change',()=>{renderSessions();renderLiveStrip();});
     $('glCsvFile').addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;try{state.source=csvRows(await file.text());state.csvName=file.name;$('glExchange').value='csv';state.exchange='csv';const sourceTf=inferCsvTimeframe(state.source);state.info={exchange:'csv',symbol:'CSV',timeframe:sourceTf,source:file.name,updated_at:new Date().toISOString()};setStatus(`${state.source.length.toLocaleString()} timestamped CSV rows loaded. Detected ${sourceTf} source interval; choose the output timeframe and date range, then Generate analysis. Naive timestamps are treated as IST.`, 'success');}catch(err){setStatus(err.message,'error');}});
     $('glExchange').addEventListener('change',()=>{if($('glExchange').value==='csv'&&state.liveMode)setLiveMode(false);if($('glExchange').value==='csv'&&state.source.length)generate();});
     $('glCompare').addEventListener('click',renderComparison);$('glExportCandles').addEventListener('click',exportCandles);$('glExportSessions').addEventListener('click',exportSessions);$('glExportWorkbook').addEventListener('click',exportWorkbook);$('glSavePreset').addEventListener('click',()=>savePreset(false));$('glLoadPreset').addEventListener('click',()=>savePreset(true));
     setInterval(renderTimelineTicker,30_000);
+    setInterval(()=>{if(state.workloadEnabled&&document.querySelector('.nav-tab.active')?.dataset.tab==='gold-liquidity')refreshIndiaAdjustment();},60_000);
     setInterval(()=>{if(state.workloadEnabled&&state.liveMode&&state.candles.length&&document.querySelector('.nav-tab.active')?.dataset.tab==='gold-liquidity')refreshLive();},5_000);
   }
   window.loadGoldLiquidity=()=>{if(!state.workloadEnabled){setStatus('Gold Liquidity is paused. Turn it on in Data Workloads first.','warning');return;}if(!state.candles.length&&!state.loading)generate();else requestAnimationFrame(renderAll);};

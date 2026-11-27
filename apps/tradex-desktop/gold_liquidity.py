@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import html
+import re
 import threading
 import time
 import urllib.parse
@@ -230,6 +232,84 @@ def fetch_usd_inr() -> dict[str, Any]:
     if rate <= 0:
         raise RuntimeError("The FX service did not return a valid USD/INR rate")
     return {"rate": rate, "source": "ExchangeRate-API open rates", "updated_at": payload.get("time_last_update_utc")}
+
+
+def fetch_groww_goldmini() -> dict[str, Any]:
+    """Read the current Gold Mini MCX futures quote from Groww's public page."""
+    request = urllib.request.Request(
+        "https://groww.in/commodities/futures/mcx_goldm",
+        headers={"User-Agent": "Mozilla/5.0 (compatible; TradeX/1.0)", "Accept": "text/html"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            page = response.read().decode("utf-8", "replace")
+    except Exception as exc:
+        raise RuntimeError(f"Groww Gold Mini quote request failed: {exc}") from exc
+
+    match = re.search(
+        r"""<script\b[^>]*\bid=["']__NEXT_DATA__["'][^>]*>(.*?)</script>""",
+        page, re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        raise RuntimeError("Groww did not include its Gold Mini quote data in the page")
+    try:
+        payload = json.loads(html.unescape(match.group(1)))
+        static = payload["props"]["pageProps"]["staticData"]
+        details = static["contractDetails"]
+        live = static["livePriceDetails"]
+        price = float(live["ltp"])
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Groww Gold Mini quote data was missing or invalid") from exc
+    if details.get("exchange") != "MCX" or not str(details.get("contractId", "")).startswith("MCX_GOLDM") or price <= 0:
+        raise RuntimeError("Groww returned a different instrument instead of MCX Gold Mini")
+
+    raw_time = float(live.get("tsInMillis") or 0)
+    if raw_time:
+        quote_time = raw_time / 1000 if raw_time > 10_000_000_000 else raw_time
+        updated_at = datetime.fromtimestamp(quote_time, timezone.utc).isoformat()
+    else:
+        updated_at = None
+    return {
+        "price": price,
+        "currency": "INR",
+        "unit": "per 10g",
+        "source": "Groww · MCX Gold Mini Futures",
+        "contract": details.get("displayName") or details.get("contractId"),
+        "expiry": details.get("expiryDate"),
+        "updated_at": updated_at,
+    }
+
+
+_ADJUSTMENT_CACHE: tuple[float, dict[str, Any]] | None = None
+_ADJUSTMENT_LOCK = threading.RLock()
+
+
+def fetch_india_market_adjustment() -> dict[str, Any]:
+    """Calibrate INR/10g to Groww Gold Mini against live XAUUSDT and USD/INR."""
+    global _ADJUSTMENT_CACHE
+    with _ADJUSTMENT_LOCK:
+        if _ADJUSTMENT_CACHE and time.monotonic() - _ADJUSTMENT_CACHE[0] < 45:
+            return dict(_ADJUSTMENT_CACHE[1])
+    groww = fetch_groww_goldmini()
+    ticker = fetch_ticker("bybit")
+    fx = fetch_usd_inr()
+    spot_usd_oz = float(ticker["last"])
+    usd_inr = float(fx["rate"])
+    fair_inr_10g = spot_usd_oz * usd_inr * 10 / 31.1034768
+    if fair_inr_10g <= 0:
+        raise RuntimeError("Could not calculate the USD/INR converted gold reference")
+    adjustment = (float(groww["price"]) / fair_inr_10g - 1) * 100
+    result = {
+        "adjustment_percent": adjustment,
+        "groww": groww,
+        "spot": {"price": spot_usd_oz, "currency": "USD", "unit": "per troy oz", "source": "Bybit XAUUSDT", "updated_at": ticker.get("updated_at")},
+        "fx": fx,
+        "fair_inr_per_10g": fair_inr_10g,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with _ADJUSTMENT_LOCK:
+        _ADJUSTMENT_CACHE = (time.monotonic(), result)
+    return dict(result)
 
 
 def fetch_live(exchange: str, timeframe: str) -> dict[str, Any]:
