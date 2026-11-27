@@ -3,9 +3,10 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const TZ = 'Asia/Kolkata';
+  const TROY_OUNCE_GRAMS = 31.1034768;
   const TF_MS = { '1m':60000, '5m':300000, '15m':900000, '30m':1800000, '1h':3600000, '4h':14400000, '6h':21600000, '12h':43200000, '1d':86400000 };
   const TF_ORDER = Object.keys(TF_MS);
-  const state = { source: [], candles: [], daily: [], sessions: {}, exchange: 'bybit', timeframe: '1m', currency: 'USD', rate: 0, multiplier: 0, ticker: null, info: null, activeView: 'overview', sessionFilter: 'All Sessions', csvName: '', loading: false, liveMode: false, liveLoading: false };
+  const state = { source: [], candles: [], daily: [], sessions: {}, exchange: 'bybit', timeframe: '1m', currency: 'USD', rate: 0, indiaAdjustment: 14.1225, multiplier: 0, ticker: null, info: null, activeView: 'overview', sessionFilter: 'All Sessions', csvName: '', loading: false, liveMode: false, liveLoading: false };
   const istDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year:'numeric', month:'2-digit', day:'2-digit' });
   const istTimeFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour:'2-digit', minute:'2-digit', second:'2-digit', hourCycle:'h23' });
   const fmt = (n, digits=2) => Number(n).toLocaleString(state.currency === 'INR' ? 'en-IN' : 'en-US', {minimumFractionDigits:digits, maximumFractionDigits:digits});
@@ -31,10 +32,15 @@
   }
   function updateMultiplier() {
     state.rate=Number($('glFxRate')?.value)||0;
-    state.multiplier=state.rate*1.1/3;
+    const adjustmentInput=Number($('glIndiaAdjustment')?.value);
+    state.indiaAdjustment=Number.isFinite(adjustmentInput)?adjustmentInput:0;
+    state.multiplier=state.rate*10/TROY_OUNCE_GRAMS*(1+state.indiaAdjustment/100);
     const el=$('glMultiplier');
-    if(el) el.textContent=`INR multiplier ${state.multiplier ? state.multiplier.toFixed(6) : '—'}`;
+    if(el) el.textContent=`INR/10g per $/oz × ${state.multiplier ? state.multiplier.toFixed(6) : '—'}`;
+    const unit=$('glUnitBadge');
+    if(unit) unit.textContent=state.currency==='INR'?'INR / 10g':'USD / troy oz';
     localStorage.setItem('tradex.goldLiquidity.rate', String(state.rate||''));
+    localStorage.setItem('tradex.goldLiquidity.indiaAdjustment', String(state.indiaAdjustment));
   }
   function setLiveMode(enabled) {
     state.liveMode=!!enabled&&$('glExchange').value!=='csv';
@@ -165,7 +171,19 @@
     const grid=new Map();
     state.candles.forEach(c=>{ if(!c.delta) return; const hour=Number(istTimeFmt.format(new Date(c.time)).slice(0,2)); const key=`${hour}|${istParts(c.time).date}`; const v=grid.get(key)||{sum:0,count:0};v.sum+=Math.abs(c.delta);v.count++;grid.set(key,v); });
     const max=Math.max(1,...[...grid.values()].map(v=>v.sum/v.count));
-    host.innerHTML=`<div class="gl-heatmap-scroll"><div class="gl-heatmap-grid" style="--gl-columns:${dates.length}"><div class="gl-heatmap-corner">IST</div>${dates.map(d=>`<div class="gl-heatmap-date">${d.slice(5)}</div>`).join('')}${Array.from({length:24},(_,hour)=>`<div class="gl-heatmap-hour">${String(hour).padStart(2,'0')}:00</div>${dates.map(date=>{const v=grid.get(`${hour}|${date}`);const ratio=v?Math.min(1,(v.sum/v.count)/max):0;return `<div class="gl-heat-cell" title="${date} ${String(hour).padStart(2,'0')}:00 IST · ${v?money(v.sum/v.count):'No candles'}" style="--heat:${v?0.1+ratio*.9:0}"></div>`;}).join('')}`).join('')}</div></div><div class="gl-heat-legend"><span>Quiet</span><i></i><i></i><i></i><i></i><i></i><span>High movement</span></div>`;
+    const today=dateNowIST(),weekDates=dates.slice(-7);
+    const mean=keys=>{const values=keys.map(k=>grid.get(k)).filter(Boolean);return values.length?values.reduce((s,v)=>s+v.sum/v.count,0)/values.length:null;};
+    const weekly=Array.from({length:24},(_,h)=>mean(weekDates.map(d=>`${h}|${d}`))),daily=Array.from({length:24},(_,h)=>mean([`${h}|${today}`]));
+    const scale=Math.max(1,...weekly.filter(Number.isFinite),...daily.filter(Number.isFinite));
+    const bars=(values,kind)=>`<div class="gl-hour-rail gl-${kind}-rail"><strong>${kind==='week'?'Last 7 days':'Today'}</strong>${values.map((v,h)=>`<div class="gl-hour-bar-row" title="${String(h).padStart(2,'0')}:00 IST · ${v===null?'No candles':money(v)}"><i style="--bar:${v===null?0:Math.max(2,v/scale*100)}%"></i></div>`).join('')}</div>`;
+    host.innerHTML=`<div class="gl-heatmap-layout">${bars(weekly,'week')}<div class="gl-heatmap-scroll"><div class="gl-heatmap-grid" style="--gl-columns:${dates.length}"><div class="gl-heatmap-corner">IST</div>${dates.map(d=>`<div class="gl-heatmap-date">${d.slice(5)}</div>`).join('')}${Array.from({length:24},(_,hour)=>`<div class="gl-heatmap-hour">${String(hour).padStart(2,'0')}:00</div>${dates.map(date=>{const v=grid.get(`${hour}|${date}`);const ratio=v?Math.min(1,(v.sum/v.count)/max):0;return `<div class="gl-heat-cell" title="${date} ${String(hour).padStart(2,'0')}:00 IST · ${v?money(v.sum/v.count):'No candles'}" style="--heat:${v?0.1+ratio*.9:0}"></div>`;}).join('')}`).join('')}</div></div>${bars(daily,'today')}</div><div class="gl-heat-legend"><span>Quiet</span><i></i><i></i><i></i><i></i><i></i><span>High movement · bar width uses same scale</span></div>`;
+  }
+  function renderClockVolatility() {
+    const host=$('glClockVolatility');if(!host)return;
+    const buckets=Array.from({length:24},()=>({sum:0,count:0}));
+    state.candles.forEach(c=>{if(!c.delta)return;const h=Number(istTimeFmt.format(new Date(c.time)).slice(0,2)),b=buckets[h];b.sum+=Math.abs(c.delta);b.count++;});
+    const max=Math.max(1,...buckets.map(b=>b.count?b.sum/b.count:0));
+    host.innerHTML=`<div class="gl-clock-vol-bars">${buckets.map((b,h)=>{const avg=b.count?b.sum/b.count:null;return `<div class="gl-clock-vol-col" title="${String(h).padStart(2,'0')}:00–${String(h).padStart(2,'0')}:59 IST · ${avg===null?'No candles':money(avg)} average absolute move"><i style="--bar:${avg===null?0:Math.max(2,avg/max*100)}%"></i><span>${String(h).padStart(2,'0')}</span></div>`;}).join('')}</div><div class="gl-clock-vol-axis"><span>00:00 IST</span><span>12:00</span><span>24:00</span></div>`;
   }
   function renderDirection() {
     const host=$('glDirectionMix');if(!host)return;
@@ -255,7 +273,7 @@
   function renderAll() {
     updateMultiplier();
     if(!state.candles.length)return;
-    renderKpis(state.candles);renderLiveStrip();renderDaily();renderCandleTable();renderSessions();renderTimeframes();renderComparison();
+    renderKpis(state.candles);renderLiveStrip();renderDaily();renderClockVolatility();renderCandleTable();renderSessions();renderTimeframes();renderComparison();
     requestAnimationFrame(()=>{drawDailyChart();drawDeltaChart();});
   }
   function detectGaps(source,tf) { const ms=TF_MS[tf];let gaps=0;for(let i=1;i<source.length;i++)if(source[i].time-source[i-1].time>ms)gaps+=Math.max(1,Math.round((source[i].time-source[i-1].time)/ms)-1);return gaps; }
@@ -335,13 +353,13 @@
   }
   function download(name,content,type='text/csv;charset=utf-8') {const blob=new Blob(['\ufeff',content],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();URL.revokeObjectURL(url);}
   function csvCell(x) {return `"${String(x??'').replaceAll('"','""')}"`;}
-  function exportCandles() {const rows=[['IST close time','Open','High','Low','Close','Volume','Movement',`Currency ${state.currency}`,`USD/INR ${state.rate}`],...state.candles.map(c=>[istDateTime(c.close_time||c.time+TF_MS[state.timeframe]-1),displayed(c.open),displayed(c.high),displayed(c.low),displayed(c.close),c.volume,displayed(c.delta),state.currency,state.rate])];download('gold-liquidity-candles.csv',rows.map(r=>r.map(csvCell).join(',')).join('\r\n'));}
-  function exportSessions() {const rows=[['Session','Count',`Range (${state.currency})`,`Net (${state.currency})`,`Average absolute move (${state.currency})`,`Average signed move (${state.currency})`,`USD/INR rate`, 'Mode'],...Object.values(state.sessions).map(s=>[s.name,s.count,...[s.range,s.net,s.avgAbs,s.avgSigned].map(displayed),state.rate,state.currency])];download('gold-liquidity-sessions.csv',rows.map(r=>r.map(csvCell).join(',')).join('\r\n'));}
+  function exportCandles() {const rows=[['IST close time','Open','High','Low','Close','Volume','Movement',`Currency ${state.currency}`,`Price unit ${state.currency==='INR'?'INR/10g':'USD/troy oz'}`,`USD/INR ${state.rate}`,`India adjustment percent ${state.indiaAdjustment}`],...state.candles.map(c=>[istDateTime(c.close_time||c.time+TF_MS[state.timeframe]-1),displayed(c.open),displayed(c.high),displayed(c.low),displayed(c.close),c.volume,displayed(c.delta),state.currency,state.currency==='INR'?'INR per 10g':'USD per troy oz',state.rate,state.indiaAdjustment])];download('gold-liquidity-candles.csv',rows.map(r=>r.map(csvCell).join(',')).join('\r\n'));}
+  function exportSessions() {const rows=[['Session','Count',`Range (${state.currency})`,`Net (${state.currency})`,`Average absolute move (${state.currency})`,`Average signed move (${state.currency})`,`Displayed unit`,`USD/INR rate`,`India adjustment percent`],...Object.values(state.sessions).map(s=>[s.name,s.count,...[s.range,s.net,s.avgAbs,s.avgSigned].map(displayed),state.currency==='INR'?'INR per 10g':'USD per troy oz',state.rate,state.indiaAdjustment])];download('gold-liquidity-sessions.csv',rows.map(r=>r.map(csvCell).join(',')).join('\r\n'));}
   function exportWorkbook() {
     const sheets=[['Daily', [['Date','Open','High','Low','Close','Range','Net','Abs movement'],...state.daily.map(d=>[d.label,...[d.open,d.high,d.low,d.close,d.range,d.net,d.abs].map(displayed)])]],
       ['Candles',[['IST close','Open','High','Low','Close','Volume','Movement'],...state.candles.map(c=>[istDateTime(c.close_time||c.time+TF_MS[state.timeframe]-1),...['open','high','low','close'].map(k=>displayed(c[k])),c.volume,displayed(c.delta)])]],
       ['Sessions',[['Name','Candles','Range','Net','Avg absolute','Avg signed'],...Object.values(state.sessions).map(s=>[s.name,s.count,displayed(s.range),displayed(s.net),displayed(s.avgAbs),displayed(s.avgSigned)])]],
-      ['Settings',[['Currency mode',state.currency],['USD to INR rate',state.rate],['INR multiplier',state.multiplier],['Exchange',state.info?.source||'CSV'],['Symbol',state.info?.symbol||'CSV'],['Timeframe',state.timeframe],['Start date IST',$('glStartDate').value],['End date IST',$('glEndDate').value]]]];
+      ['Settings',[['Currency mode',state.currency],['Displayed unit',state.currency==='INR'?'INR per 10g':'USD per troy oz'],['USD to INR rate',state.rate],['India market adjustment percent',state.indiaAdjustment],['Troy ounce grams',TROY_OUNCE_GRAMS],['INR multiplier (per 10g per USD/oz)',state.multiplier],['Exchange',state.info?.source||'CSV'],['Symbol',state.info?.symbol||'CSV'],['Timeframe',state.timeframe],['Start date IST',$('glStartDate').value],['End date IST',$('glEndDate').value]]]];
     const escXml=x=>String(x??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
     const xml=`<?xml version="1.0"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">${sheets.map(([name,rows])=>`<Worksheet ss:Name="${name}"><Table>${rows.map(row=>`<Row>${row.map(v=>`<Cell><Data ss:Type="${typeof v==='number'?'Number':'String'}">${escXml(v)}</Data></Cell>`).join('')}</Row>`).join('')}</Table></Worksheet>`).join('')}</Workbook>`;
     download('gold-liquidity-report.xls',xml,'application/vnd.ms-excel;charset=utf-8');
@@ -349,12 +367,13 @@
   function savePreset(load=false) {
     const key='tradex.goldLiquidity.preset';
     if(load){const v=JSON.parse(localStorage.getItem(key)||'null');if(!v){setStatus('No saved GoldLiquidity preset yet.','warning');return;}for(const [id,val] of Object.entries(v))if($(id))$(id).value=val;state.currency=v.currency||'USD';document.querySelectorAll('[data-gl-currency]').forEach(b=>b.classList.toggle('active',b.dataset.glCurrency===state.currency));updateMultiplier();generate();return;}
-    const v={glExchange:$('glExchange').value,glTimeframe:$('glTimeframe').value,glStartDate:$('glStartDate').value,glEndDate:$('glEndDate').value,glDstMode:$('glDstMode').value,glFxRate:$('glFxRate').value,currency:state.currency};localStorage.setItem(key,JSON.stringify(v));setStatus('GoldLiquidity preset saved on this device.','success');
+    const v={glExchange:$('glExchange').value,glTimeframe:$('glTimeframe').value,glStartDate:$('glStartDate').value,glEndDate:$('glEndDate').value,glDstMode:$('glDstMode').value,glFxRate:$('glFxRate').value,glIndiaAdjustment:$('glIndiaAdjustment').value,currency:state.currency};localStorage.setItem(key,JSON.stringify(v));setStatus('GoldLiquidity preset saved on this device.','success');
   }
   async function init() {
     if(!$('panel-gold-liquidity'))return;
     const end=dateNowIST();$('glEndDate').value=end;$('glStartDate').value=shiftDate(end,-6);
     const savedRate=Number(localStorage.getItem('tradex.goldLiquidity.rate'));if(savedRate>0)$('glFxRate').value=String(savedRate);
+    const savedAdjustment=localStorage.getItem('tradex.goldLiquidity.indiaAdjustment');if(savedAdjustment!==null)$('glIndiaAdjustment').value=savedAdjustment;
     setCurrency(localStorage.getItem('tradex.goldLiquidity.currency')||'USD');updateMultiplier();refreshFx();
     document.querySelectorAll('[data-gl-currency]').forEach(b=>b.addEventListener('click',()=>setCurrency(b.dataset.glCurrency)));
     document.querySelectorAll('[data-gl-view]').forEach(b=>b.addEventListener('click',()=>showView(b.dataset.glView)));
@@ -362,7 +381,7 @@
     $('glLiveToggle').addEventListener('click',()=>setLiveMode(!state.liveMode));
     state.liveMode=localStorage.getItem('tradex.goldLiquidity.liveMode')==='true'&&$('glExchange').value!=='csv';
     setLiveMode(state.liveMode);
-    $('glGenerate').addEventListener('click',generate);$('glFxRate').addEventListener('input',()=>{updateMultiplier();renderAll();});$('glFxRefresh').addEventListener('click',refreshFx);$('glDstMode').addEventListener('change',()=>{renderSessions();renderLiveStrip();});
+    $('glGenerate').addEventListener('click',generate);$('glFxRate').addEventListener('input',()=>{updateMultiplier();renderAll();});$('glIndiaAdjustment').addEventListener('input',()=>{updateMultiplier();renderAll();});$('glFxRefresh').addEventListener('click',refreshFx);$('glDstMode').addEventListener('change',()=>{renderSessions();renderLiveStrip();});
     $('glCsvFile').addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;try{state.source=csvRows(await file.text());state.csvName=file.name;$('glExchange').value='csv';state.exchange='csv';const sourceTf=inferCsvTimeframe(state.source);state.info={exchange:'csv',symbol:'CSV',timeframe:sourceTf,source:file.name,updated_at:new Date().toISOString()};setStatus(`${state.source.length.toLocaleString()} timestamped CSV rows loaded. Detected ${sourceTf} source interval; choose the output timeframe and date range, then Generate analysis. Naive timestamps are treated as IST.`, 'success');}catch(err){setStatus(err.message,'error');}});
     $('glExchange').addEventListener('change',()=>{if($('glExchange').value==='csv'&&state.liveMode)setLiveMode(false);if($('glExchange').value==='csv'&&state.source.length)generate();});
     $('glCompare').addEventListener('click',renderComparison);$('glExportCandles').addEventListener('click',exportCandles);$('glExportSessions').addEventListener('click',exportSessions);$('glExportWorkbook').addEventListener('click',exportWorkbook);$('glSavePreset').addEventListener('click',()=>savePreset(false));$('glLoadPreset').addEventListener('click',()=>savePreset(true));
