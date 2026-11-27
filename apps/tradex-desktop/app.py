@@ -175,6 +175,7 @@ def extract_rows(index: dict[str, Any]) -> list[dict[str, Any]]:
                     "day_change": result.get("day_change", 0.0),
                     "day_change_perc": result.get("day_change_perc", 0.0),
                     "prev_close": result.get("prev_close", 0.0),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
 
         # Update lot size in config so downstream logic uses it

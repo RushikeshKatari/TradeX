@@ -123,6 +123,7 @@ function showPageTab(tabName) {
   if (activeTab === 'chart' && typeof window.loadTechnicalMarket === 'function') {
     window.loadTechnicalMarket();
   }
+  if (activeTab === 'pnl') requestAnimationFrame(() => renderPnl(false));
 }
 
 // ==========================================================================
@@ -1185,6 +1186,7 @@ let pnlScrollRefreshTimer = null;
 let pnlChainScrollPauseUntil = 0;
 const pnlFullChainCache = new Map();
 const pnlFullChainLoading = new Set();
+const PNL_CHAIN_RECENTER_COOLDOWN_MS = 60 * 60 * 1000;
 
 function pnlNumber(v) {
   const n = Number(String(v ?? '').replace(/[^0-9.-]/g, ''));
@@ -1193,6 +1195,19 @@ function pnlNumber(v) {
 
 function pnlFullChainKey(position) {
   return `${String(position.index || '').toUpperCase()}|${String(position.expiry || '')}`;
+}
+
+function pnlQuoteIsLive(observedAt = '') {
+  if (latestState?.enabled !== true) return false;
+  const updatedAt = Date.parse(observedAt || latestState?.last_update || '');
+  const maxAgeMs = Math.max(30_000, (Number(cfg?.refresh_seconds) || 5) * 3_000);
+  return Number.isFinite(updatedAt) && Date.now() - updatedAt <= maxAgeMs;
+}
+
+function pnlQuoteTimestamp(position, row) {
+  const cache = pnlFullChainCache.get(pnlFullChainKey(position));
+  if (cache?.rows?.includes(row)) return cache.lastUpdate || row.snapshot_time || '';
+  return latestState?.last_update || row?.snapshot_time || '';
 }
 
 async function ensurePnlFullChain(position) {
@@ -1219,27 +1234,32 @@ function pnlQuote(position, strike, side) {
   if (!strike || strike <= 0) return null;
   const field = side === 'CE' ? 'call' : 'put';
   const posIdx = String(position.index || '').toUpperCase();
-  const fullRows = pnlFullChainCache.get(pnlFullChainKey(position))?.rows;
-  const rows = fullRows ?? latestState?.rows ?? [];
+  const fullRows = pnlFullChainCache.get(pnlFullChainKey(position))?.rows || [];
+  const rows = [...fullRows, ...(latestState?.rows || [])];
   const row = rows.find(x => String(x.index || '').toUpperCase() === posIdx
     && (!position.expiry || String(x.expiry) === String(position.expiry))
     && Number(x.strike) === Number(strike)
     && pnlNumber(x[field]) > 0);
   if (row) {
-    return { price: pnlNumber(row[field]), observedAt: row.snapshot_time || latestState?.last_update || '', source: 'Option chain', live: true };
+    const observedAt = pnlQuoteTimestamp(position, row);
+    return { price: pnlNumber(row[field]), observedAt, source: 'Option chain', live: pnlQuoteIsLive(observedAt) };
   }
   const cache = Object.values(latestState?.last_option_prices || {}).find(x => String(x.index || '').toUpperCase() === posIdx
     && (!position.expiry || String(x.expiry) === String(position.expiry))
     && Number(x.strike) === Number(strike)
     && x.side === side
     && pnlNumber(x.price) > 0);
-  return cache ? { price: pnlNumber(cache.price), observedAt: cache.observed_at || '', source: cache.source || 'Last recorded quote', live: false } : null;
+  const observedAt = cache?.observed_at || '';
+  return cache ? { price: pnlNumber(cache.price), observedAt, source: cache.source || 'Last recorded quote', live: pnlQuoteIsLive(observedAt) } : null;
 }
 
 function pnlRowQuote(position, row, side) {
   const field = side === 'CE' ? 'call' : 'put';
   const price = pnlNumber(row?.[field]);
-  if (price > 0) return { price, live: true, observedAt: row.snapshot_time || latestState?.last_update || '' };
+  if (price > 0) {
+    const observedAt = pnlQuoteTimestamp(position, row);
+    return { price, live: pnlQuoteIsLive(observedAt), observedAt };
+  }
   return pnlQuote(position, Number(row?.strike), side);
 }
 
@@ -1496,6 +1516,10 @@ function renderStrategyPackPanel(p) {
   const liveSpot = pnlLiveSpot(p);
   const liveAtmStrike = pnlAtmStrike(p, chainRows);
   const hasLiveChainRows = chainRows.length > 0;
+  const spotDetails = latestState?.underlying_details?.[p.index]
+    || latestState?.underlying_details?.[String(p.index || '').toUpperCase()] || {};
+  const spotDayChange = Number(spotDetails.day_change);
+  const spotIsLive = pnlQuoteIsLive(spotDetails.updated_at || '');
 
   // Keep every invested strike in the matrix even when the live feed omits
   // that strike (for example during a partial refresh or on a different expiry).
@@ -1520,7 +1544,7 @@ function renderStrategyPackPanel(p) {
 
   const filterInput = `
     <div style="margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
-      <div style="font-size: 12px; font-weight: 700; color: #38bdf8;">📊 Live Option Chain (Expiry: ${esc(p.expiry || 'Latest')})${fullChain && !fullChain.fullChain ? '<small style="display:block;margin-top:3px;color:#fbbf24;font-weight:500;">Cached subset shown · turn on backend scraping to load all strikes</small>' : ''}</div>
+      <div style="font-size: 12px; font-weight: 700; color: #38bdf8;">📊 Option Chain · ${pnlQuoteIsLive() ? '<span style="color:#10b981">LIVE</span>' : '<span style="color:#fbbf24">LAST QUOTE</span>'} · ${esc(p.expiry || 'Latest')}<small style="display:block;margin-top:3px;color:var(--text-dim);font-weight:500;">Auto-centers invested strikes once per hour · prices update while Backend scraping is on</small>${fullChain && !fullChain.fullChain ? '<small style="display:block;margin-top:3px;color:#fbbf24;font-weight:500;">Cached subset shown · turn on backend scraping to load all strikes</small>' : ''}</div>
       <div style="display: flex; align-items: center; gap: 8px;">
         <span style="font-size: 10px; color: var(--text-dim);">${shownLen} of ${totalChainLen} strikes</span>
         <input type="text" placeholder="Filter strikes…" value="${esc(query)}"
@@ -1549,7 +1573,7 @@ function renderStrategyPackPanel(p) {
       if (ceLeg) {
         callCell = `
           <div style="display: flex; justify-content: space-between; align-items: baseline;">
-            <span style="font-size: 9px; font-weight: 800; color: #fff; background: rgba(16, 185, 129, 0.45); padding: 1px 4px; border-radius: 3px; letter-spacing: 0.3px;">${ceLeg.hasLiveQuote ? '★ INVESTED · LIVE' : '★ INVESTED'}</span>
+            <span style="font-size: 9px; font-weight: 800; color: #fff; background: ${ceLeg.hasLiveQuote ? 'rgba(16, 185, 129, 0.45)' : 'rgba(251, 191, 36, 0.35)'}; padding: 1px 4px; border-radius: 3px; letter-spacing: 0.3px;">${ceLeg.hasLiveQuote ? '★ INVESTED · LIVE' : (ceLeg.quoteSource ? '★ INVESTED · LAST' : '★ INVESTED')}</span>
             <span title="${esc(ceLeg.quoteObservedAt)}" style="font-weight: 800; font-size: 13px; color: var(--call-light);">${ceLeg.hasLiveQuote || ceLeg.quoteSource ? `₹${ceLeg.liveLtp.toFixed(2)}` : '—'}</span>
           </div>
           <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 3px;">
@@ -1575,7 +1599,7 @@ function renderStrategyPackPanel(p) {
         putCell = `
           <div style="display: flex; justify-content: space-between; align-items: baseline;">
             <span title="${esc(peLeg.quoteObservedAt)}" style="font-weight: 800; font-size: 13px; color: var(--put-light);">${peLeg.hasLiveQuote || peLeg.quoteSource ? `₹${peLeg.liveLtp.toFixed(2)}` : '—'}</span>
-            <span style="font-size: 9px; font-weight: 800; color: #fff; background: rgba(244, 63, 94, 0.45); padding: 1px 4px; border-radius: 3px; letter-spacing: 0.3px;">${peLeg.hasLiveQuote ? '★ INVESTED · LIVE' : '★ INVESTED'}</span>
+            <span style="font-size: 9px; font-weight: 800; color: #fff; background: ${peLeg.hasLiveQuote ? 'rgba(244, 63, 94, 0.45)' : 'rgba(251, 191, 36, 0.35)'}; padding: 1px 4px; border-radius: 3px; letter-spacing: 0.3px;">${peLeg.hasLiveQuote ? '★ INVESTED · LIVE' : (peLeg.quoteSource ? '★ INVESTED · LAST' : '★ INVESTED')}</span>
           </div>
           <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 3px;">
             <span style="font-size: 12px; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: ${peLeg.legPnl >= 0 ? '#10b981' : '#f43f5e'};">
@@ -1651,10 +1675,10 @@ function renderStrategyPackPanel(p) {
           <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
             <span class="pnl-badge" style="font-size: 12px; padding: 3px 10px;">${esc(p.index)}</span>
             <div style="font-weight: 800; font-size: 16px; color: #fff;">${esc(p.strategy || `${legCountLabel} Strategy Pack`)}</div>
-            <div style="display: flex; gap: 8px; font-size: 11px; color: var(--text-muted); align-items: center;">
+            <div style="display: flex; gap: 8px; font-size: 11px; color: var(--text-muted); align-items: center; flex-wrap: wrap;">
               <span>Expiry: <strong style="color: #fbbf24;">${esc(p.expiry || 'Latest')}</strong></span>
               <span>·</span>
-              <span>Spot: <strong style="color: #fff;">₹${liveSpot ? formatMoney(liveSpot) : '—'}</strong></span>
+              <span title="${spotIsLive ? 'Live underlying quote' : 'Last known underlying quote'}">Spot: <strong style="color: #fff;">₹${liveSpot ? formatMoney(liveSpot) : '—'}</strong>${Number.isFinite(spotDayChange) && spotDayChange !== 0 ? `<strong style="color:${spotDayChange > 0 ? '#10b981' : '#f43f5e'};"> (${spotDayChange > 0 ? '+' : '−'}₹${formatMoney(Math.abs(spotDayChange))})</strong>` : ''}<small style="color:${spotIsLive ? '#10b981' : '#fbbf24'};font-weight:700;">${spotIsLive ? ' LIVE' : (liveSpot ? ' LAST' : ' OFFLINE')}</small></span>
               <span>·</span>
               <span>ATM: <strong style="color: #fbbf24;">${liveAtmStrike || '—'}</strong></span>
               <span>·</span>
@@ -1950,18 +1974,22 @@ function renderPnl(force = true) {
   requestAnimationFrame(() => {
     setTimeout(() => {
       pnlPositions.forEach(p => {
-        if (!p.isPack && !(p.legs && p.legs.length)) return;
+        const hasPositionLegs = p.isPack || (p.legs && p.legs.length)
+          || Number(p.callStrike) > 0 || Number(p.putStrike) > 0;
+        if (!hasPositionLegs) return;
         const scrollContainer = document.getElementById(`pnl-chain-scroll-${p.id}`);
         const investedRows = scrollContainer?.querySelectorAll('[data-invested-row="true"]');
-        if (investedRows?.length && scrollContainer?.dataset.hasLiveRows === 'true') {
-          const cooldownKey = `tradex.pnlChainRecenterAt.v2.${p.id}`;
+        if (investedRows?.length && scrollContainer?.dataset.hasLiveRows === 'true'
+            && scrollContainer.clientHeight > 0 && scrollContainer.getClientRects().length) {
+          const cooldownKey = `tradex.pnlChainRecenterAt.v3.${p.id}`;
           const lastRecenter = Number(localStorage.getItem(cooldownKey) || 0);
-          if (Date.now() - lastRecenter < 60 * 60 * 1000) return;
+          if (Date.now() - lastRecenter < PNL_CHAIN_RECENTER_COOLDOWN_MS) return;
 
           // Center the full invested-strike span, not just its first row.
           const first = investedRows[0].getBoundingClientRect();
           const last = investedRows[investedRows.length - 1].getBoundingClientRect();
           const containerRect = scrollContainer.getBoundingClientRect();
+          if (first.height <= 0 || last.height <= 0 || scrollContainer.scrollHeight <= scrollContainer.clientHeight) return;
           const investedCenter = (first.top + last.bottom) / 2;
           const delta = investedCenter - (containerRect.top + scrollContainer.clientHeight / 2);
           const maxScroll = scrollContainer.scrollHeight - scrollContainer.clientHeight;
