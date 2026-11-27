@@ -47,6 +47,8 @@
     localStorage.setItem('tradex.goldLiquidity.liveMode',String(state.liveMode));
     const button=$('glLiveToggle');
     if(button){button.classList.toggle('active',state.liveMode);button.setAttribute('aria-pressed',String(state.liveMode));button.textContent=state.liveMode?'● Live mode · ON':'● Live mode · OFF';}
+    $('glHistoryControls')?.classList.toggle('is-hidden',state.liveMode);
+    $('glTimeframeControls')?.classList.toggle('is-hidden',state.liveMode);
     if(enabled&&!state.workloadEnabled){setStatus('Gold Liquidity is paused. Turn it on in Data Workloads before requesting live prices.','warning');return;}
     if(enabled&&!state.liveMode){setStatus('Live Mode needs an exchange source. Select Bybit, OKX, Binance, or Gate.io; uploaded CSV data has no live feed.','warning');return;}
     if(state.liveMode){setStatus('Live Mode is on. Current exchange candles and ticker will refresh while this tab is open.','success');if(!state.candles.length&&!state.loading)generate();else refreshLive();}
@@ -404,6 +406,7 @@
     document.querySelectorAll('[data-gl-view]').forEach(b=>b.addEventListener('click',()=>showView(b.dataset.glView)));
     document.querySelectorAll('[data-gl-preset]').forEach(b=>b.addEventListener('click',()=>{sessionPreset(b.dataset.glPreset==='today'?1:Number(b.dataset.glPreset));generate();}));
     $('glLiveToggle').addEventListener('click',()=>setLiveMode(!state.liveMode));
+    setLiveMode(false);
     renderTimeframeButtons();
     $('glGenerate').addEventListener('click',generate);$('glFxRate').addEventListener('input',()=>{updateMultiplier();renderAll();});$('glIndiaAdjustment').addEventListener('input',()=>{updateMultiplier();renderAll();});$('glFxRefresh').addEventListener('click',refreshFx);$('glDstMode').addEventListener('change',()=>{renderSessions();renderLiveStrip();});
     $('glCsvFile').addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;try{state.source=csvRows(await file.text());state.csvName=file.name;$('glExchange').value='csv';state.exchange='csv';const sourceTf=inferCsvTimeframe(state.source);state.info={exchange:'csv',symbol:'CSV',timeframe:sourceTf,source:file.name,updated_at:new Date().toISOString()};setStatus(`${state.source.length.toLocaleString()} timestamped CSV rows loaded. Detected ${sourceTf} source interval; choose the output timeframe and date range, then Generate analysis. Naive timestamps are treated as IST.`, 'success');}catch(err){setStatus(err.message,'error');}});

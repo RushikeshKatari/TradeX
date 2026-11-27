@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TradeX Pro · Options Chain &amp; Trading Terminal</title>
   <link rel="icon" type="image/png" href="/static/images/tradex-logo.png">
-  <link rel="stylesheet" href="/static/css/main.css?v=2.17">
+  <link rel="stylesheet" href="/static/css/main.css?v=2.18">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -412,16 +412,18 @@
         <button id="glLiveToggle" type="button" class="gl-live-toggle" aria-pressed="false">● Live mode · OFF</button>
       </section>
 
-      <section class="card gl-toolbar">
+      <section id="glHistoryControls" class="card gl-toolbar gl-history-controls">
+        <label>Start date<input id="glStartDate" type="date" class="form-control" aria-label="Start date (IST)"></label>
+        <label>End date<input id="glEndDate" type="date" class="form-control" aria-label="End date (IST)"></label>
         <label>Exchange<select id="glExchange" class="form-control"><option value="bybit">Bybit · XAUUSDT</option><option value="okx">OKX · XAU-USDT-SWAP</option><option value="binance">Binance Spot · PAXGUSDT</option><option value="gate">Gate.io · XAU_USDT</option><option value="csv">Custom CSV</option></select></label>
-        <div class="gl-timeframe-control"><span>Timeframe · click to analyze</span><div id="glTimeframeButtons" class="gl-timeframe-buttons" role="group" aria-label="Gold Liquidity analysis timeframe"></div></div>
-        <select id="glTimeframe" class="form-control gl-timeframe-select" aria-label="Selected timeframe" hidden><option>1m</option><option>5m</option><option>15m</option><option>30m</option><option>1h</option><option>4h</option><option>6h</option><option>12h</option><option>1d</option></select>
-        <label>Start date (IST)<input id="glStartDate" type="date" class="form-control"></label>
-        <label>End date (IST)<input id="glEndDate" type="date" class="form-control"></label>
-        <label>Session clock<select id="glDstMode" class="form-control"><option value="auto">Auto · UK/US DST</option><option value="winter">Winter timings</option><option value="summer">Summer timings</option></select></label>
         <button type="button" class="btn btn-primary" id="glGenerate">Generate analysis</button>
         <label class="gl-upload">Upload CSV<input id="glCsvFile" type="file" accept=".csv,text/csv" hidden><span class="btn btn-outline">Choose file</span></label>
-        <div class="gl-presets"><button class="btn btn-sm" data-gl-preset="today">Today</button><button class="btn btn-sm" data-gl-preset="3">3 days</button><button class="btn btn-sm" data-gl-preset="7">7 days</button><button class="btn btn-sm" data-gl-preset="30">30 days</button></div>
+        <div class="gl-presets"><button class="btn btn-sm" data-gl-preset="today">Today</button><button class="btn btn-sm" data-gl-preset="3">3 days</button><button class="btn btn-sm" data-gl-preset="7">7 days</button></div>
+      </section>
+      <section id="glTimeframeControls" class="card gl-toolbar gl-timeframe-toolbar">
+        <div class="gl-timeframe-control"><span>Timeframe · click to analyze instantly</span><div id="glTimeframeButtons" class="gl-timeframe-buttons" role="group" aria-label="Gold Liquidity analysis timeframe"></div></div>
+        <select id="glTimeframe" class="form-control gl-timeframe-select" aria-label="Selected timeframe" hidden><option>1m</option><option>5m</option><option>15m</option><option>30m</option><option>1h</option><option>4h</option><option>6h</option><option>12h</option><option>1d</option></select>
+        <select id="glDstMode" class="form-control" aria-label="Session clock" hidden><option value="auto">Auto · UK/US DST</option><option value="winter">Winter timings</option><option value="summer">Summer timings</option></select>
       </section>
 
       <div id="glStatus" class="gl-status" role="status">Choose a date range and generate analysis. Prices are never synthesized.</div>
@@ -806,6 +808,6 @@
   <!-- Scripts -->
   <script src="/static/js/app.js?v=2.19"></script>
   <script src="/static/js/chart.js?v=3.5"></script>
-  <script src="/static/js/gold_liquidity.js?v=1.4"></script>
+  <script src="/static/js/gold_liquidity.js?v=1.5"></script>
 </body>
 </html>
