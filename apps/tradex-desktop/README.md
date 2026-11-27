@@ -27,6 +27,10 @@ In Windows PowerShell, use `py -3 -m venv .venv`, then `.\.venv\Scripts\Activate
 
 Open http://127.0.0.1:5000. Settings are saved to `tradex_config.json` in this folder.
 
+## Gold Liquidity
+
+Open the **Gold Liquidity** tab beside Technical Analysis for historical gold-market analysis. It downloads actual OHLCV candles from Bybit XAUUSDT, OKX XAU-USDT-SWAP, Gate.io XAU_USDT, or Binance Spot PAXGUSDT, and accepts timestamped OHLCV CSV files. Daily grouping and displayed times use Asia/Kolkata (IST). The INR conversion is `(USD ÷ 3) × USD/INR rate × 1.1`; raw candles remain in USD for calculations. It includes daily range charts, candle movement logs, hourly volatility, UK/US DST-aware sessions, timeframe summaries, and custom date comparisons. Source gaps are reported and never filled with generated prices. Some exchanges may not list the requested contract or full historical range, in which case the dashboard reports the source error.
+
 ## Configure a source
 
 Add a market name, category, and an `http(s)` page URL. Gold Mini and Silver Mini are configured for Groww's MCX options pages with the supplied expiries and illiquid contracts excluded. The default extractor reads HTML table rows. For pages with a different layout, provide a CSS selector for each row and for its expiry, strike, call, and put values. The field selectors are evaluated inside each selected row. Exact strike values are comma-separated; leave them empty to include all available strikes. Expiry matching uses the exact visible text from the page.

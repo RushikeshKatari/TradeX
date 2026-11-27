@@ -29,7 +29,7 @@ if [[ -z "$LOGO_PYTHON" ]] || ! "$LOGO_PYTHON" -c 'import PIL' >/dev/null 2>&1; 
 fi
 "$LOGO_PYTHON" "$ROOT/generate_logo_assets.py"
 cp "$ROOT/assets/TradeX.icns" "$RES/TradeX.icns"
-cp "$ROOT/app.py" "$ROOT/chart_analyzer.py" "$ROOT/technical_analysis.py" "$ROOT/market_intelligence.py" "$ROOT/groww_scraper.py" "$ROOT/scan_all_strikes_to_sheets.py" "$ROOT/sweep_and_extract_groww.py" "$ROOT/groww_interactive_chart_scanner.py" "$ROOT/ocr_number_extractor.py" "$ROOT/requirements.txt" "$RES/backend/"
+cp "$ROOT/app.py" "$ROOT/chart_analyzer.py" "$ROOT/technical_analysis.py" "$ROOT/market_intelligence.py" "$ROOT/gold_liquidity.py" "$ROOT/groww_scraper.py" "$ROOT/scan_all_strikes_to_sheets.py" "$ROOT/sweep_and_extract_groww.py" "$ROOT/groww_interactive_chart_scanner.py" "$ROOT/ocr_number_extractor.py" "$ROOT/requirements.txt" "$RES/backend/"
 cp "$ROOT/tradex_config.example.json" "$RES/backend/tradex_config.json"
 cp -R "$ROOT/templates" "$ROOT/static" "$ROOT/flask" "$ROOT/werkzeug" "$ROOT/requests" "$ROOT/bs4" "$RES/backend/"
 cp -R "$RUNTIME/." "$RES/runtime/"

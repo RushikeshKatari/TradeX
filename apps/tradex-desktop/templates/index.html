@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TradeX Pro · Options Chain &amp; Trading Terminal</title>
   <link rel="icon" type="image/png" href="/static/images/tradex-logo.png">
-  <link rel="stylesheet" href="/static/css/main.css?v=2.12">
+  <link rel="stylesheet" href="/static/css/main.css?v=2.13">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -80,6 +80,10 @@
       <button class="nav-tab" data-tab="chart" onclick="showPageTab('chart')" role="tab" aria-selected="false">
         <span class="tab-icon">📈</span>
         <span>Technical Analysis</span>
+      </button>
+      <button class="nav-tab" data-tab="gold-liquidity" onclick="showPageTab('gold-liquidity')" role="tab" aria-selected="false">
+        <span class="tab-icon">🟡</span>
+        <span>Gold Liquidity</span>
       </button>
       <button class="nav-tab" data-tab="automation" onclick="showPageTab('automation')" role="tab" aria-selected="false">
         <span class="tab-icon">🤖</span>
@@ -369,7 +373,82 @@
 
 
     <!-- ====================================================================
-         TAB 4: Automation & Google Sheets Hub
+         TAB 4: GoldLiquidity historical market intelligence
+         ==================================================================== -->
+    <div id="panel-gold-liquidity" class="tab-panel">
+      <section class="card gl-heading">
+        <div>
+          <div class="gl-brand">GoldLiquidity <span>XAUUSDT · IST</span></div>
+          <div class="card-subtitle">Historical gold price movement, session behavior, and volatility from exchange OHLCV data.</div>
+        </div>
+        <div class="gl-currency-controls">
+          <div class="gl-segmented" aria-label="Display currency">
+            <button type="button" class="active" data-gl-currency="USD">USD $</button>
+            <button type="button" data-gl-currency="INR">INR ₹</button>
+          </div>
+          <label class="gl-rate-control">USD/INR <input id="glFxRate" type="number" min="0.01" step="0.01" value="" class="form-control"><button id="glFxRefresh" type="button" class="btn btn-sm">↻</button></label>
+          <span id="glMultiplier" class="gl-multiplier">INR multiplier —</span>
+        </div>
+      </section>
+
+      <section class="card gl-toolbar">
+        <label>Exchange<select id="glExchange" class="form-control"><option value="bybit">Bybit · XAUUSDT</option><option value="okx">OKX · XAU-USDT-SWAP</option><option value="binance">Binance Spot · PAXGUSDT</option><option value="gate">Gate.io · XAU_USDT</option><option value="csv">Custom CSV</option></select></label>
+        <label>Timeframe<select id="glTimeframe" class="form-control"><option>1m</option><option>5m</option><option>15m</option><option>30m</option><option>1h</option><option>4h</option><option>6h</option><option>12h</option><option>1d</option></select></label>
+        <label>Start date (IST)<input id="glStartDate" type="date" class="form-control"></label>
+        <label>End date (IST)<input id="glEndDate" type="date" class="form-control"></label>
+        <label>Session clock<select id="glDstMode" class="form-control"><option value="auto">Auto · UK/US DST</option><option value="winter">Winter timings</option><option value="summer">Summer timings</option></select></label>
+        <button type="button" class="btn btn-primary" id="glGenerate">Generate analysis</button>
+        <label class="gl-upload">Upload CSV<input id="glCsvFile" type="file" accept=".csv,text/csv" hidden><span class="btn btn-outline">Choose file</span></label>
+        <div class="gl-presets"><button class="btn btn-sm" data-gl-preset="today">Today</button><button class="btn btn-sm" data-gl-preset="3">3 days</button><button class="btn btn-sm" data-gl-preset="7">7 days</button><button class="btn btn-sm" data-gl-preset="30">30 days</button></div>
+      </section>
+
+      <div id="glStatus" class="gl-status" role="status">Choose a date range and generate analysis. Prices are never synthesized.</div>
+      <div class="gl-live-strip" id="glLiveStrip"></div>
+      <div id="glKpis" class="gl-kpis"></div>
+
+      <nav class="gl-subnav" role="tablist" aria-label="Gold liquidity analysis views">
+        <button class="active" data-gl-view="overview">Overview</button>
+        <button data-gl-view="candles">Candle Log</button>
+        <button data-gl-view="sessions">Session Intelligence</button>
+        <button data-gl-view="timeframes">Timeframe Matrix</button>
+        <button data-gl-view="compare">Range Comparison</button>
+      </nav>
+
+      <section id="glView-overview" class="gl-view active">
+        <div class="gl-session-clock card"><div class="card-title">24-hour IST session clock <span id="glNowIst" class="gl-now-badge"></span></div><div id="glSessionTimeline"></div></div>
+        <div class="gl-grid-2">
+          <section class="card"><div class="card-title">Daily range &amp; net movement</div><div class="gl-chart-wrap"><canvas id="glDailyChart"></canvas><div id="glDailyTooltip" class="gl-tooltip" hidden></div></div></section>
+          <section class="card"><div class="card-title">IST hourly volatility heatmap</div><div class="card-subtitle">Average absolute close-to-close movement per hour; empty cells mean no source candles.</div><div id="glHeatmap" class="gl-heatmap"></div></section>
+        </div>
+        <section class="card"><div class="card-title">Bullish vs. bearish candle distribution</div><div id="glDirectionMix" class="gl-direction-mix"></div></section>
+        <section class="card"><div class="card-title">Daily summary · IST</div><div class="table-responsive"><table class="data-table"><thead><tr><th>Date</th><th>First open</th><th>High</th><th>Low</th><th>Last close</th><th>Range</th><th>Net move</th><th>Total abs. move</th><th>Max +</th><th>Max −</th></tr></thead><tbody id="glDailyTable"></tbody></table></div></section>
+      </section>
+
+      <section id="glView-candles" class="gl-view">
+        <section class="card"><div class="card-title">Candle-by-candle close movement</div><div class="card-subtitle">Current close − previous close. Continuity carries across IST midnight; the first candle is 0.00.</div><div class="gl-chart-wrap gl-chart-tall"><canvas id="glDeltaChart"></canvas><div id="glDeltaTooltip" class="gl-tooltip" hidden></div></div></section>
+        <section class="card"><div class="card-title">Movement log · grouped by IST date</div><div class="card-subtitle">Each date expands to every loaded candle. The close-to-close movement continues across midnight.</div><div id="glCandleGroups" class="gl-date-groups"></div></section>
+      </section>
+
+      <section id="glView-sessions" class="gl-view">
+        <section class="card"><div class="card-title">IST session comparison</div><div id="glSessionBars" class="gl-session-bars"></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Session</th><th>Candles</th><th>Open</th><th>Close</th><th>High</th><th>Low</th><th>Range</th><th>Net</th><th>Avg. abs. move</th><th>Avg. signed move</th><th>Max + / −</th></tr></thead><tbody id="glSessionTable"></tbody></table></div><div class="gl-session-filters" id="glSessionFilters"></div><div id="glSessionLog" class="gl-date-groups"></div></section>
+        <details class="card"><summary class="card-title">Gold key times · IST</summary><div class="gl-key-times" id="glKeyTimes"></div><div class="gl-footnote">Session times follow each date’s UK and US daylight-saving calendars in Auto mode. Verify event dates against official calendars.</div></details>
+      </section>
+
+      <section id="glView-timeframes" class="gl-view">
+        <section class="card"><div class="card-title">Average movement &amp; volatility scaling</div><div class="card-subtitle">Timeframes are aggregated from the loaded source candles. Smaller intervals than the downloaded source interval are unavailable.</div><div id="glTimeframeChart" class="gl-timeframe-chart"></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Timeframe</th><th>Candles</th><th>Avg. absolute</th><th>Avg. signed</th><th>Avg. positive</th><th>Avg. negative</th></tr></thead><tbody id="glTimeframeTable"></tbody></table></div></section>
+      </section>
+
+      <section id="glView-compare" class="gl-view">
+        <section class="card"><div class="card-title">Period A vs. Period B</div><div class="gl-compare-controls"><label>Period A start<input id="glAStart" type="date" class="form-control"></label><label>Period A end<input id="glAEnd" type="date" class="form-control"></label><label>Period B start<input id="glBStart" type="date" class="form-control"></label><label>Period B end<input id="glBEnd" type="date" class="form-control"></label><button id="glCompare" class="btn btn-primary">Compare loaded range</button></div><div id="glCompareChart" class="gl-compare-chart"></div><div class="table-responsive"><table class="data-table"><thead><tr><th>Metric</th><th>Period A</th><th>Period B</th><th>Δ B − A</th></tr></thead><tbody id="glCompareTable"></tbody></table></div></section>
+      </section>
+
+      <details class="card gl-export"><summary>Export &amp; saved presets</summary><div class="gl-export-actions"><button id="glExportCandles" class="btn btn-outline">Export candle CSV</button><button id="glExportSessions" class="btn btn-outline">Export session CSV</button><button id="glExportWorkbook" class="btn btn-outline">Export Excel-compatible report</button><button id="glSavePreset" class="btn btn-outline">Save preset</button><button id="glLoadPreset" class="btn btn-outline">Load preset</button></div></details>
+      <div class="gl-footnote">Exchange candles are real source OHLCV. Missing source candles remain missing; gaps are reported and are not interpolated. The INR formula is `(USD ÷ 3) × USD/INR rate × 1.1`. Sessions overlap; daily totals count each candle once. Market data and movement metrics are descriptive, not trade signals.</div>
+    </div>
+
+
+    <!-- ====================================================================
+         TAB 5: Automation & Google Sheets Hub
          ==================================================================== -->
     <div id="panel-automation" class="tab-panel">
       <div class="grid-2">
@@ -703,7 +782,8 @@
   <div class="toast-container" id="toastContainer"></div>
 
   <!-- Scripts -->
-  <script src="/static/js/app.js?v=2.16"></script>
+  <script src="/static/js/app.js?v=2.17"></script>
   <script src="/static/js/chart.js?v=3.4"></script>
+  <script src="/static/js/gold_liquidity.js?v=1.1"></script>
 </body>
 </html>

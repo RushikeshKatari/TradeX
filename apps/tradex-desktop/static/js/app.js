@@ -106,7 +106,7 @@ function updateClock() {
 }
 
 function showPageTab(tabName) {
-  const validTabs = ['terminal', 'pnl', 'chart', 'automation', 'logs'];
+  const validTabs = ['terminal', 'pnl', 'chart', 'gold-liquidity', 'automation', 'logs'];
   const activeTab = validTabs.includes(tabName) ? tabName : 'terminal';
 
   document.querySelectorAll('.nav-tab').forEach(tab => {
@@ -122,6 +122,9 @@ function showPageTab(tabName) {
   localStorage.setItem('tradex.activeTab', activeTab);
   if (activeTab === 'chart' && typeof window.loadTechnicalMarket === 'function') {
     window.loadTechnicalMarket();
+  }
+  if (activeTab === 'gold-liquidity' && typeof window.loadGoldLiquidity === 'function') {
+    window.loadGoldLiquidity();
   }
   if (activeTab === 'pnl') requestAnimationFrame(() => renderPnl(false));
 }

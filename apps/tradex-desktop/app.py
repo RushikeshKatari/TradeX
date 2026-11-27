@@ -39,6 +39,7 @@ from chart_analyzer import analyze_url as analyze_groww_chart, chart_png, parse_
 import groww_scraper as _groww_scraper
 from technical_analysis import analyze_market as analyze_technical_market, get_live_price as get_technical_live_price, warm_multi_timeframe, get_timeframe_biases, warm_long_history, get_long_term_context
 from market_intelligence import build_market_intelligence
+from gold_liquidity import fetch_candles as fetch_gold_liquidity_candles, fetch_ticker as fetch_gold_liquidity_ticker, fetch_usd_inr
 
 # Shared HTTP session for Groww scraping (connection-pool reuse)
 _groww_session = _groww_scraper._make_session(retries=2, backoff=1.0)
@@ -1117,6 +1118,39 @@ def technical_live_price_api():
         return response
     except Exception as exc:
         return jsonify(error=str(exc)), 400
+
+
+@app.get("/api/gold-liquidity/candles")
+def gold_liquidity_candles_api():
+    try:
+        return jsonify(fetch_gold_liquidity_candles(
+            str(request.args.get("exchange", "bybit")),
+            str(request.args.get("timeframe", "1m")),
+            str(request.args.get("start", "")),
+            str(request.args.get("end", "")),
+        ))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except Exception as exc:
+        return jsonify(error=str(exc)), 502
+
+
+@app.get("/api/gold-liquidity/fx")
+def gold_liquidity_fx_api():
+    try:
+        return jsonify(fetch_usd_inr())
+    except Exception as exc:
+        return jsonify(error=str(exc)), 502
+
+
+@app.get("/api/gold-liquidity/ticker")
+def gold_liquidity_ticker_api():
+    try:
+        return jsonify(fetch_gold_liquidity_ticker(str(request.args.get("exchange", "bybit"))))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except Exception as exc:
+        return jsonify(error=str(exc)), 502
 
 
 def _technical_timeframes_ready(symbol: str) -> list[str]:
