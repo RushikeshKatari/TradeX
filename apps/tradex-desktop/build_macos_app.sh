@@ -33,6 +33,21 @@ cp "$ROOT/app.py" "$ROOT/chart_analyzer.py" "$ROOT/technical_analysis.py" "$ROOT
 cp "$ROOT/tradex_config.example.json" "$RES/backend/tradex_config.json"
 cp -R "$ROOT/templates" "$ROOT/static" "$ROOT/flask" "$ROOT/werkzeug" "$ROOT/requests" "$ROOT/bs4" "$RES/backend/"
 cp -R "$RUNTIME/." "$RES/runtime/"
+# The Xcode Command Line Tools Python executable is a launcher that expects
+# its framework binary and Python.app relative to the executable. Include both
+# so the copied virtualenv can start after it has been moved into TradeX.app.
+PYTHON_FRAMEWORK_PREFIX="$("$RUNTIME/bin/python" -c 'import sysconfig; print(sysconfig.get_config_var("PYTHONFRAMEWORKPREFIX"))')"
+PYTHON_FRAMEWORK_NAME="$("$RUNTIME/bin/python" -c 'import sysconfig; print(sysconfig.get_config_var("PYTHONFRAMEWORK"))')"
+PYTHON_VERSION="$("$RUNTIME/bin/python" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+if [[ -n "$PYTHON_FRAMEWORK_PREFIX" && -n "$PYTHON_FRAMEWORK_NAME" ]]; then
+  PYTHON_FRAMEWORK="$PYTHON_FRAMEWORK_PREFIX/$PYTHON_FRAMEWORK_NAME.framework/Versions/$PYTHON_VERSION"
+  if [[ -f "$PYTHON_FRAMEWORK/$PYTHON_FRAMEWORK_NAME" ]]; then
+    cp "$PYTHON_FRAMEWORK/$PYTHON_FRAMEWORK_NAME" "$RES/runtime/$PYTHON_FRAMEWORK_NAME"
+    if [[ -d "$PYTHON_FRAMEWORK/Resources" ]]; then
+      cp -R "$PYTHON_FRAMEWORK/Resources" "$RES/runtime/"
+    fi
+  fi
+fi
 cp -R "$CHROMIUM" "$HEADLESS_SHELL" "$RES/ms-playwright/"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
