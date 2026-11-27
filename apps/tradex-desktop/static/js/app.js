@@ -1520,6 +1520,9 @@ function renderStrategyPackPanel(p) {
     || latestState?.underlying_details?.[String(p.index || '').toUpperCase()] || {};
   const spotDayChange = Number(spotDetails.day_change);
   const spotIsLive = pnlQuoteIsLive(spotDetails.updated_at || '');
+  const spotMoveLabel = Number.isFinite(spotDayChange) && spotDayChange !== 0
+    ? `${spotDayChange > 0 ? '+' : '−'}₹${formatMoney(Math.abs(spotDayChange))}` : '₹0';
+  const spotMarker = liveSpot ? '──────' : '────── (Spot quote unavailable) ──────';
 
   // Keep every invested strike in the matrix even when the live feed omits
   // that strike (for example during a partial refresh or on a different expiry).
@@ -1641,7 +1644,8 @@ function renderStrategyPackPanel(p) {
   }
 
   const chainTableHtml = `
-    <div style="background: rgba(14, 22, 38, 0.5); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px; height: 100%;">
+      <div style="background: rgba(14, 22, 38, 0.5); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px; height: 100%;">
+      <div title="${spotIsLive ? 'Live underlying price and session change' : 'Last known underlying price and session change'}" style="text-align:center;margin:0 0 10px;padding:8px 6px;border-radius:6px;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.18);font:700 12px 'JetBrains Mono',monospace;color:#bae6fd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${spotMarker}${liveSpot ? `<span style="color:#fff;"> ₹${formatMoney(liveSpot)} (${spotMoveLabel}) </span>${spotIsLive ? '<span style="color:#10b981;font:700 10px Inter,sans-serif;">LIVE</span>' : '<span style="color:#fbbf24;font:700 10px Inter,sans-serif;">LAST</span>'}` : ''}</div>
       ${filterInput}
       <div id="${chainScrollId}" data-has-live-rows="${hasLiveChainRows}" style="max-height: ${chainViewportHeight}px; overflow-y: auto; border: 1px solid rgba(255,255,255,0.06); border-radius: 6px;">
         <table class="data-table" style="width: 100%; margin: 0; font-size: 12px;">
@@ -1993,8 +1997,12 @@ function renderPnl(force = true) {
           const investedCenter = (first.top + last.bottom) / 2;
           const delta = investedCenter - (containerRect.top + scrollContainer.clientHeight / 2);
           const maxScroll = scrollContainer.scrollHeight - scrollContainer.clientHeight;
-          scrollContainer.scrollTop = Math.max(0, Math.min(maxScroll, scrollContainer.scrollTop + delta));
-          localStorage.setItem(cooldownKey, String(Date.now()));
+          const previousScrollTop = scrollContainer.scrollTop;
+          const nextScrollTop = Math.max(0, Math.min(maxScroll, previousScrollTop + delta));
+          if (Math.abs(nextScrollTop - previousScrollTop) >= 2) {
+            scrollContainer.scrollTop = nextScrollTop;
+            localStorage.setItem(cooldownKey, String(Date.now()));
+          }
         }
       });
     }, 80);
