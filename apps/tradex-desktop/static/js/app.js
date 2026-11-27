@@ -107,7 +107,9 @@ async function init() {
 function resetWorkloadPolling() {
   if (workloadPollTimer) clearInterval(workloadPollTimer);
   const marketDataActive = tradeXWorkloads.sections.terminal || tradeXWorkloads.sections.pnl;
-  workloadPollTimer = setInterval(poll, marketDataActive && scrapingOn ? 1500 : 5000);
+  // Poll market snapshots often enough for live quotes while leaving time for
+  // the option-chain and PnL views to paint smoothly between updates.
+  workloadPollTimer = setInterval(poll, marketDataActive && scrapingOn ? 3000 : 5000);
 }
 
 function applyWorkloads(value) {
@@ -198,10 +200,16 @@ function showPageTab(tabName) {
   if (activeTab === 'chart' && typeof window.loadTechnicalMarket === 'function') {
     window.loadTechnicalMarket();
   }
+  if (activeTab === 'terminal' && latestState) {
+    renderPairs();
+    renderOptionsChain();
+  }
   if (activeTab === 'gold-liquidity' && typeof window.loadGoldLiquidity === 'function') {
     window.loadGoldLiquidity();
   }
   if (activeTab === 'pnl') requestAnimationFrame(() => renderPnl(false));
+  if (activeTab === 'automation' && latestState) renderSheetsProgress(latestState);
+  if (activeTab === 'logs' && latestState) renderLogs();
 }
 
 // ==========================================================================
@@ -2769,11 +2777,19 @@ async function poll() {
       lastSyncEl.textContent = dt && !isNaN(dt.getTime()) ? dt.toLocaleTimeString() : (s.last_update || '—');
     }
 
-    renderPairs();
-    renderOptionsChain();
-    if (tradeXWorkloads.sections.pnl) renderPnlFromPoll();
-    renderSheetsProgress(s);
-    renderLogs();
+    // Keep hidden, data-heavy panels out of the hot polling render path.
+    // Each view is refreshed when it becomes visible and then while active.
+    const visibleTab = document.querySelector('.nav-tab.active')?.dataset.tab || 'terminal';
+    if (visibleTab === 'terminal') {
+      renderPairs();
+      renderOptionsChain();
+    } else if (visibleTab === 'pnl' && tradeXWorkloads.sections.pnl) {
+      renderPnlFromPoll();
+    } else if (visibleTab === 'automation') {
+      renderSheetsProgress(s);
+    } else if (visibleTab === 'logs') {
+      renderLogs();
+    }
 
     const bannerStatus = document.getElementById('scraperBannerStatus');
     if (bannerStatus) {
