@@ -232,6 +232,68 @@ def fetch_usd_inr() -> dict[str, Any]:
     return {"rate": rate, "source": "ExchangeRate-API open rates", "updated_at": payload.get("time_last_update_utc")}
 
 
+def fetch_live(exchange: str, timeframe: str) -> dict[str, Any]:
+    """Fetch the current in-progress candles and ticker without history cache."""
+    exchange = exchange.lower().strip()
+    timeframe = timeframe.lower().strip()
+    if exchange not in EXCHANGES:
+        raise ValueError("Select Binance, Bybit, OKX, or Gate.io for Live Mode")
+    if timeframe not in TIMEFRAMES:
+        raise ValueError("Unsupported live timeframe")
+    symbol = SYMBOLS[exchange]
+    interval = TIMEFRAMES[timeframe][exchange]
+    interval_ms = TIMEFRAMES[timeframe]["ms"]
+
+    if exchange == "binance":
+        payload = _get_json(_url("https://api.binance.com/api/v3/klines", {
+            "symbol": symbol, "interval": interval, "limit": 5,
+        }))
+        candles = [_to_candle(row[0], row[1], row[2], row[3], row[4], row[5], interval_ms)
+                   for row in payload if len(row) >= 7] if isinstance(payload, list) else []
+    elif exchange == "bybit":
+        payload = _get_json(_url("https://api.bybit.com/v5/market/kline", {
+            "category": "linear", "symbol": symbol, "interval": interval, "limit": 5,
+        }))
+        if payload.get("retCode") != 0:
+            raise RuntimeError(payload.get("retMsg") or "Bybit returned a live candle error")
+        rows = (payload.get("result") or {}).get("list") or []
+        candles = [_to_candle(row[0], row[1], row[2], row[3], row[4], row[5], interval_ms)
+                   for row in rows if len(row) >= 6]
+    elif exchange == "okx":
+        payload = _get_json(_url("https://www.okx.com/api/v5/market/candles", {
+            "instId": symbol, "bar": interval, "limit": 5,
+        }))
+        if payload.get("code") != "0":
+            raise RuntimeError(payload.get("msg") or "OKX returned a live candle error")
+        rows = payload.get("data") or []
+        candles = [_to_candle(row[0], row[1], row[2], row[3], row[4], row[5], interval_ms)
+                   for row in rows if len(row) >= 6]
+    else:
+        payload = _get_json(_url("https://api.gateio.ws/api/v4/futures/usdt/candlesticks", {
+            "contract": symbol, "interval": interval, "limit": 5,
+        }))
+        candles = []
+        if isinstance(payload, list):
+            for row in payload:
+                if isinstance(row, dict):
+                    candles.append(_to_candle(int(row.get("t") or row.get("time")), row["o"], row["h"], row["l"], row["c"], row.get("v", 0), interval_ms))
+                elif len(row) >= 6:
+                    candles.append(_to_candle(row[0], row[5], row[3], row[4], row[2], row[1], interval_ms))
+
+    candles = sorted({int(c["time"]): c for c in candles}.values(), key=lambda c: c["time"])
+    if not candles:
+        raise RuntimeError(f"{exchange.title()} returned no current {symbol} {timeframe} candles")
+    ticker = None
+    ticker_error = None
+    try:
+        ticker = fetch_ticker(exchange)
+    except Exception as exc:
+        ticker_error = str(exc)
+    return {"exchange": exchange, "symbol": symbol, "timeframe": timeframe,
+            "candles": candles, "ticker": ticker, "ticker_error": ticker_error,
+            "updated_at": datetime.now(timezone.utc).isoformat()}
+
+
 def fetch_ticker(exchange: str) -> dict[str, Any]:
     exchange = exchange.lower().strip()
     if exchange not in EXCHANGES:

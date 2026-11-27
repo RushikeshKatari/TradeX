@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TradeX Pro · Options Chain &amp; Trading Terminal</title>
   <link rel="icon" type="image/png" href="/static/images/tradex-logo.png">
-  <link rel="stylesheet" href="/static/css/main.css?v=2.13">
+  <link rel="stylesheet" href="/static/css/main.css?v=2.14">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -379,7 +379,7 @@
       <section class="card gl-heading">
         <div>
           <div class="gl-brand">GoldLiquidity <span>XAUUSDT · IST</span></div>
-          <div class="card-subtitle">Historical gold price movement, session behavior, and volatility from exchange OHLCV data.</div>
+          <div class="card-subtitle">Live and historical gold price movement, session behavior, and volatility from exchange OHLCV data.</div>
         </div>
         <div class="gl-currency-controls">
           <div class="gl-segmented" aria-label="Display currency">
@@ -389,6 +389,7 @@
           <label class="gl-rate-control">USD/INR <input id="glFxRate" type="number" min="0.01" step="0.01" value="" class="form-control"><button id="glFxRefresh" type="button" class="btn btn-sm">↻</button></label>
           <span id="glMultiplier" class="gl-multiplier">INR multiplier —</span>
         </div>
+        <button id="glLiveToggle" type="button" class="gl-live-toggle" aria-pressed="false">● Live mode · OFF</button>
       </section>
 
       <section class="card gl-toolbar">
@@ -784,6 +785,6 @@
   <!-- Scripts -->
   <script src="/static/js/app.js?v=2.17"></script>
   <script src="/static/js/chart.js?v=3.4"></script>
-  <script src="/static/js/gold_liquidity.js?v=1.1"></script>
+  <script src="/static/js/gold_liquidity.js?v=1.2"></script>
 </body>
 </html>
