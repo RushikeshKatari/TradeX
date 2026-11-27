@@ -6,7 +6,7 @@
   const TROY_OUNCE_GRAMS = 31.1034768;
   const TF_MS = { '1m':60000, '5m':300000, '15m':900000, '30m':1800000, '1h':3600000, '4h':14400000, '6h':21600000, '12h':43200000, '1d':86400000 };
   const TF_ORDER = Object.keys(TF_MS);
-  const state = { source: [], candles: [], daily: [], sessions: {}, exchange: 'bybit', timeframe: '1m', currency: 'USD', rate: 0, indiaAdjustment: 14.1225, multiplier: 0, ticker: null, info: null, activeView: 'overview', sessionFilter: 'All Sessions', csvName: '', loading: false, liveMode: false, liveLoading: false };
+  const state = { source: [], candles: [], daily: [], sessions: {}, exchange: 'bybit', timeframe: '1m', currency: 'USD', rate: 0, indiaAdjustment: 14.1225, multiplier: 0, ticker: null, info: null, activeView: 'overview', sessionFilter: 'All Sessions', csvName: '', loading: false, queuedGenerate: false, liveMode: false, liveLoading: false, workloadEnabled: false };
   const istDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year:'numeric', month:'2-digit', day:'2-digit' });
   const istTimeFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour:'2-digit', minute:'2-digit', second:'2-digit', hourCycle:'h23' });
   const fmt = (n, digits=2) => Number(n).toLocaleString(state.currency === 'INR' ? 'en-IN' : 'en-US', {minimumFractionDigits:digits, maximumFractionDigits:digits});
@@ -43,15 +43,17 @@
     localStorage.setItem('tradex.goldLiquidity.indiaAdjustment', String(state.indiaAdjustment));
   }
   function setLiveMode(enabled) {
-    state.liveMode=!!enabled&&$('glExchange').value!=='csv';
+    state.liveMode=!!enabled&&state.workloadEnabled&&$('glExchange').value!=='csv';
     localStorage.setItem('tradex.goldLiquidity.liveMode',String(state.liveMode));
     const button=$('glLiveToggle');
     if(button){button.classList.toggle('active',state.liveMode);button.setAttribute('aria-pressed',String(state.liveMode));button.textContent=state.liveMode?'● Live mode · ON':'● Live mode · OFF';}
+    if(enabled&&!state.workloadEnabled){setStatus('Gold Liquidity is paused. Turn it on in Data Workloads before requesting live prices.','warning');return;}
     if(enabled&&!state.liveMode){setStatus('Live Mode needs an exchange source. Select Bybit, OKX, Binance, or Gate.io; uploaded CSV data has no live feed.','warning');return;}
     if(state.liveMode){setStatus('Live Mode is on. Current exchange candles and ticker will refresh while this tab is open.','success');if(!state.candles.length&&!state.loading)generate();else refreshLive();}
     else setStatus('Live Mode is off. The loaded historical analysis remains available.','info');
   }
   async function refreshFx() {
+    if(!state.workloadEnabled)return;
     const b=$('glFxRefresh'); if(b) b.disabled=true;
     try {
       const response=await fetch('/api/gold-liquidity/fx',{cache:'no-store'}); const data=await response.json();
@@ -278,7 +280,8 @@
   }
   function detectGaps(source,tf) { const ms=TF_MS[tf];let gaps=0;for(let i=1;i<source.length;i++)if(source[i].time-source[i-1].time>ms)gaps+=Math.max(1,Math.round((source[i].time-source[i-1].time)/ms)-1);return gaps; }
   async function generate() {
-    if(state.loading)return;const ex=$('glExchange').value;state.exchange=ex;state.timeframe=$('glTimeframe').value;
+    if(!state.workloadEnabled){setStatus('Gold Liquidity is paused. Turn it on in Data Workloads before generating analysis.','warning');return;}
+    if(state.loading){state.queuedGenerate=true;return;}const ex=$('glExchange').value;state.exchange=ex;state.timeframe=$('glTimeframe').value;
     const start=$('glStartDate').value,end=$('glEndDate').value;if(!start||!end||end<start){setStatus('Choose a valid start and end date. Dates are interpreted in IST.','error');return;}
     if(ex==='csv') {if(!state.source.length){setStatus('Choose a CSV file with timestamp, open, high, low, close, and optional volume columns.','warning');return;}const sourceTf=state.info?.timeframe||state.timeframe;const filtered=state.source.filter(c=>{const d=istParts(c.time).date;return d>=start&&d<=end;});state.info={exchange:'csv',symbol:'CSV',timeframe:sourceTf,source:state.csvName||'Uploaded CSV',updated_at:new Date().toISOString()};state.candles=decorate(timeframeBars(filtered,state.timeframe)||[]);renderAll();setStatus(`${state.candles.length.toLocaleString()} candles loaded from ${state.csvName} (${sourceTf} source interval). Dates grouped in IST; no missing prices were filled.`, state.candles.length?'success':'warning');return;}
     state.loading=true;$('glGenerate').disabled=true;setStatus(`Loading actual ${state.timeframe} candles from ${ex}…`, 'info');
@@ -292,17 +295,17 @@
       const partialEnd=expectedEnd-(endGap+TF_MS[state.timeframe])>TF_MS[state.timeframe]*2;
       const coverage=partialStart||partialEnd?` Requested ${istDateLabel(requestedStart)}–${istDateLabel(requestedEnd-1)}; returned coverage is ${istDateLabel(startGap)}–${istDateLabel(endGap)}${partialStart?' (start of requested history is unavailable)':''}${partialEnd?' (end of requested history is unavailable)':''}.`:'';
       setStatus(`${data.count.toLocaleString()} real ${state.timeframe} candles from ${data.source} · ${istDateTime(startGap)} to ${istDateTime(endGap)}.${coverage}${gaps?` Source gaps: ${gaps.toLocaleString()} missing candles; none were interpolated.`:' No internal gaps detected at this interval.'}`,gaps||partialStart||partialEnd?'warning':'success');
-      renderAll();if(state.liveMode)refreshLive();else fetchTicker(ex);
+      renderAll();if(state.liveMode)refreshLive();
     } catch(e) {state.source=[];state.candles=[];state.info=null;state.ticker=null;renderAll();setStatus(e.message,'error');}
-    finally {state.loading=false;$('glGenerate').disabled=false;}
+    finally {state.loading=false;$('glGenerate').disabled=false;if(state.queuedGenerate){state.queuedGenerate=false;queueMicrotask(generate);}}
   }
   async function fetchTicker(exchange) {
-    if(exchange==='csv')return;
+    if(!state.workloadEnabled||exchange==='csv')return;
     try {const r=await fetch(`/api/gold-liquidity/ticker?exchange=${encodeURIComponent(exchange)}`,{cache:'no-store'});const d=await r.json();if(!r.ok)throw new Error(d.error||'Ticker unavailable');state.ticker=d;renderLiveStrip();}
     catch(e){state.ticker=null;renderLiveStrip();setStatus(`${$('glStatus').textContent} Live ticker unavailable: ${e.message}. Historical candles remain available.`, 'warning');}
   }
   async function refreshLive() {
-    if(!state.liveMode||state.liveLoading||state.exchange==='csv'||!state.candles.length)return;
+    if(!state.workloadEnabled||!state.liveMode||state.liveLoading||state.exchange==='csv'||!state.candles.length)return;
     state.liveLoading=true;
     try {
       const query=new URLSearchParams({exchange:state.exchange,timeframe:state.timeframe});
@@ -369,26 +372,46 @@
     if(load){const v=JSON.parse(localStorage.getItem(key)||'null');if(!v){setStatus('No saved GoldLiquidity preset yet.','warning');return;}for(const [id,val] of Object.entries(v))if($(id))$(id).value=val;state.currency=v.currency||'USD';document.querySelectorAll('[data-gl-currency]').forEach(b=>b.classList.toggle('active',b.dataset.glCurrency===state.currency));updateMultiplier();generate();return;}
     const v={glExchange:$('glExchange').value,glTimeframe:$('glTimeframe').value,glStartDate:$('glStartDate').value,glEndDate:$('glEndDate').value,glDstMode:$('glDstMode').value,glFxRate:$('glFxRate').value,glIndiaAdjustment:$('glIndiaAdjustment').value,currency:state.currency};localStorage.setItem(key,JSON.stringify(v));setStatus('GoldLiquidity preset saved on this device.','success');
   }
+  function renderTimeframeButtons() {
+    const host=$('glTimeframeButtons');if(!host)return;
+    host.innerHTML=TF_ORDER.map(tf=>`<button type="button" data-gl-timeframe="${tf}" class="${tf===state.timeframe?'active':''}">${tf.toUpperCase()}</button>`).join('');
+    host.querySelectorAll('[data-gl-timeframe]').forEach(button=>button.addEventListener('click',()=>{
+      state.timeframe=button.dataset.glTimeframe;$('glTimeframe').value=state.timeframe;
+      host.querySelectorAll('button').forEach(item=>item.classList.toggle('active',item===button));
+      generate();
+    }));
+  }
+  window.setGoldLiquidityWorkload = enabled => {
+    const wasEnabled=state.workloadEnabled;state.workloadEnabled=!!enabled;
+    if(!state.workloadEnabled){
+      if(state.liveMode)setLiveMode(false);
+      setStatus('Gold Liquidity is paused. Turn it on in Data Workloads to request exchange data.','warning');
+      return;
+    }
+    refreshFx();
+    if(!wasEnabled){
+      if(localStorage.getItem('tradex.goldLiquidity.liveMode')==='true')setLiveMode(true);
+      else if(!state.candles.length&&!state.loading)generate();
+    }
+  };
   async function init() {
     if(!$('panel-gold-liquidity'))return;
     const end=dateNowIST();$('glEndDate').value=end;$('glStartDate').value=shiftDate(end,-6);
     const savedRate=Number(localStorage.getItem('tradex.goldLiquidity.rate'));if(savedRate>0)$('glFxRate').value=String(savedRate);
     const savedAdjustment=localStorage.getItem('tradex.goldLiquidity.indiaAdjustment');if(savedAdjustment!==null)$('glIndiaAdjustment').value=savedAdjustment;
-    setCurrency(localStorage.getItem('tradex.goldLiquidity.currency')||'USD');updateMultiplier();refreshFx();
+    setCurrency(localStorage.getItem('tradex.goldLiquidity.currency')||'USD');updateMultiplier();
     document.querySelectorAll('[data-gl-currency]').forEach(b=>b.addEventListener('click',()=>setCurrency(b.dataset.glCurrency)));
     document.querySelectorAll('[data-gl-view]').forEach(b=>b.addEventListener('click',()=>showView(b.dataset.glView)));
-    document.querySelectorAll('[data-gl-preset]').forEach(b=>b.addEventListener('click',()=>sessionPreset(b.dataset.glPreset==='today'?1:Number(b.dataset.glPreset))));
+    document.querySelectorAll('[data-gl-preset]').forEach(b=>b.addEventListener('click',()=>{sessionPreset(b.dataset.glPreset==='today'?1:Number(b.dataset.glPreset));generate();}));
     $('glLiveToggle').addEventListener('click',()=>setLiveMode(!state.liveMode));
-    state.liveMode=localStorage.getItem('tradex.goldLiquidity.liveMode')==='true'&&$('glExchange').value!=='csv';
-    setLiveMode(state.liveMode);
+    renderTimeframeButtons();
     $('glGenerate').addEventListener('click',generate);$('glFxRate').addEventListener('input',()=>{updateMultiplier();renderAll();});$('glIndiaAdjustment').addEventListener('input',()=>{updateMultiplier();renderAll();});$('glFxRefresh').addEventListener('click',refreshFx);$('glDstMode').addEventListener('change',()=>{renderSessions();renderLiveStrip();});
     $('glCsvFile').addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;try{state.source=csvRows(await file.text());state.csvName=file.name;$('glExchange').value='csv';state.exchange='csv';const sourceTf=inferCsvTimeframe(state.source);state.info={exchange:'csv',symbol:'CSV',timeframe:sourceTf,source:file.name,updated_at:new Date().toISOString()};setStatus(`${state.source.length.toLocaleString()} timestamped CSV rows loaded. Detected ${sourceTf} source interval; choose the output timeframe and date range, then Generate analysis. Naive timestamps are treated as IST.`, 'success');}catch(err){setStatus(err.message,'error');}});
     $('glExchange').addEventListener('change',()=>{if($('glExchange').value==='csv'&&state.liveMode)setLiveMode(false);if($('glExchange').value==='csv'&&state.source.length)generate();});
     $('glCompare').addEventListener('click',renderComparison);$('glExportCandles').addEventListener('click',exportCandles);$('glExportSessions').addEventListener('click',exportSessions);$('glExportWorkbook').addEventListener('click',exportWorkbook);$('glSavePreset').addEventListener('click',()=>savePreset(false));$('glLoadPreset').addEventListener('click',()=>savePreset(true));
     setInterval(renderTimelineTicker,30_000);
-    setInterval(()=>{if(state.liveMode&&state.candles.length&&document.querySelector('.nav-tab.active')?.dataset.tab==='gold-liquidity')refreshLive();},5_000);
-    setInterval(()=>{if(!state.liveMode&&state.candles.length&&document.querySelector('.nav-tab.active')?.dataset.tab==='gold-liquidity')fetchTicker(state.exchange);},15_000);
+    setInterval(()=>{if(state.workloadEnabled&&state.liveMode&&state.candles.length&&document.querySelector('.nav-tab.active')?.dataset.tab==='gold-liquidity')refreshLive();},5_000);
   }
-  window.loadGoldLiquidity=()=>{if(!state.candles.length&&!state.loading)generate();else requestAnimationFrame(renderAll);};
+  window.loadGoldLiquidity=()=>{if(!state.workloadEnabled){setStatus('Gold Liquidity is paused. Turn it on in Data Workloads first.','warning');return;}if(!state.candles.length&&!state.loading)generate();else requestAnimationFrame(renderAll);};
   document.addEventListener('DOMContentLoaded',init);
 })();

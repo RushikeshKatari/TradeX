@@ -18,6 +18,11 @@
     const symbolControl = document.getElementById('taSymbol');
     const timeframeControl = document.getElementById('taTimeframe');
     if (!canvas() || state.loading) return;
+    if (window.tradeXWorkloads && !window.tradeXWorkloads.sections.technical) {
+      const notice = document.getElementById('taNotice');
+      if (notice) { notice.hidden = false; notice.textContent = 'Technical Analysis is paused. Turn it on in Data Workloads to fetch charts and live prices.'; }
+      return;
+    }
     const nextSymbol = symbolControl?.value || state.symbol;
     const nextTimeframe = timeframeControl?.value || state.timeframe;
     const changed = nextSymbol !== state.symbol || nextTimeframe !== state.timeframe;
@@ -34,12 +39,7 @@
       const mode = document.getElementById('taAnalysisMode')?.value || 'complete';
       const q = new URLSearchParams({symbol: state.symbol, timeframe: state.timeframe, mode, _: force ? String(Date.now()) : ''});
       const query = q.toString();
-      let response;
-      try {
-        response = await fetch(`http://127.0.0.1:8767/api/ta/market?${query}`);
-      } catch (_) {
-        response = await fetch(`/api/ta/market?${query}`);
-      }
+      const response = await fetch(`/api/ta/market?${query}`);
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Market analysis failed');
       const wasFollowing = !state.data || state.viewEnd === null || state.viewEnd >= state.data.candles.length;
@@ -200,9 +200,7 @@
     if(state.liveQuoteLoading||!state.symbol)return;
     state.liveQuoteLoading=true;
     try {
-      let response;
-      try { response=await fetch(`http://127.0.0.1:8767/api/ta/price?symbol=${encodeURIComponent(state.symbol)}`,{cache:'no-store'}); }
-      catch(_) { response=await fetch(`/api/ta/price?symbol=${encodeURIComponent(state.symbol)}`,{cache:'no-store'}); }
+      const response=await fetch(`/api/ta/price?symbol=${encodeURIComponent(state.symbol)}`,{cache:'no-store'});
       if(!response.ok)return;
       const quote=await response.json(),price=Number(quote.price);
       if(!(price>0)||quote.symbol!==state.symbol)return;
@@ -390,10 +388,19 @@
     if(c){c.addEventListener('pointerdown',e=>{if(e.button!==0)return;const r=c.getBoundingClientRect();state.dragX=e.clientX-r.left;state.dragEnd=state.viewEnd; c.setPointerCapture(e.pointerId);});c.addEventListener('pointermove',pointerMove);c.addEventListener('pointerup',()=>{state.dragX=null;});c.addEventListener('pointercancel',()=>{state.dragX=null;});c.addEventListener('pointerleave',()=>{if(state.dragX===null){state.hover=null;const card=document.getElementById('taHoverCard');if(card)card.hidden=true;draw();}});c.addEventListener('wheel',e=>{e.preventDefault();const old=state.visibleBars;state.visibleBars=Math.max(30,Math.min(500,old+(e.deltaY>0?Math.ceil(old*.12):-Math.ceil(old*.12))));draw();},{passive:false});}
     window.addEventListener('resize',draw);
     if(window.ResizeObserver&&c)new ResizeObserver(draw).observe(c.parentElement);
-    state.timer=setInterval(()=>{if(document.getElementById('panel-chart')?.classList.contains('active'))loadTechnicalMarket();},30000);
-    state.liveQuoteTimer=setInterval(()=>{if(document.getElementById('panel-chart')?.classList.contains('active'))refreshLiveQuote();},2500);
+    state.timer=setInterval(()=>{if(window.tradeXWorkloads?.sections.technical&&document.getElementById('panel-chart')?.classList.contains('active'))loadTechnicalMarket();},30000);
+    state.liveQuoteTimer=setInterval(()=>{if(window.tradeXWorkloads?.sections.technical&&document.getElementById('panel-chart')?.classList.contains('active'))refreshLiveQuote();},10000);
     if(document.getElementById('panel-chart')?.classList.contains('active'))loadTechnicalMarket();
     if(document.getElementById('panel-chart')?.classList.contains('active'))refreshLiveQuote();
   }
+  window.setTechnicalWorkload = enabled => {
+    const notice = document.getElementById('taNotice');
+    if (!enabled) {
+      if (notice) { notice.hidden = false; notice.textContent = 'Technical Analysis is paused. Turn it on in Data Workloads to resume analysis and live prices.'; }
+    } else {
+      loadTechnicalMarket(true);
+      refreshLiveQuote();
+    }
+  };
   document.addEventListener('DOMContentLoaded',initTechnicalChart);
 })();

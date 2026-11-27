@@ -8,6 +8,12 @@ let pollBusy = false;
 let scrapingOn = false;
 let latestState = null;
 let scraperAppConnected = false;
+let tradeXWorkloads = {
+  sections: { terminal: false, pnl: false, technical: false, gold_liquidity: false },
+  instruments: { NIFTY: false, SENSEX: false, GOLDM: false, SILVERM: false }
+};
+let workloadSaveBusy = false;
+let workloadPollTimer = null;
 let currentFilterStrike = '';
 let currentLogLevel = 'all';
 
@@ -68,6 +74,7 @@ async function init() {
 
   try {
     cfg = await api('/api/config');
+    await loadWorkloads();
     renderIndicesList();
     fillSheetsForm();
 
@@ -94,7 +101,75 @@ async function init() {
   showPageTab(savedTab);
 
   // Background state polling (sub-second live streaming)
-  setInterval(poll, 300);
+  resetWorkloadPolling();
+}
+
+function resetWorkloadPolling() {
+  if (workloadPollTimer) clearInterval(workloadPollTimer);
+  const marketDataActive = tradeXWorkloads.sections.terminal || tradeXWorkloads.sections.pnl;
+  workloadPollTimer = setInterval(poll, marketDataActive && scrapingOn ? 1500 : 5000);
+}
+
+function applyWorkloads(value) {
+  tradeXWorkloads = {
+    sections: { ...tradeXWorkloads.sections, ...(value?.sections || {}) },
+    instruments: { ...tradeXWorkloads.instruments, ...(value?.instruments || {}) }
+  };
+  window.tradeXWorkloads = tradeXWorkloads;
+  document.querySelectorAll('[data-workload-section]').forEach(input => {
+    input.checked = !!tradeXWorkloads.sections[input.dataset.workloadSection];
+  });
+  document.querySelectorAll('[data-workload-instrument]').forEach(input => {
+    input.checked = !!tradeXWorkloads.instruments[input.dataset.workloadInstrument];
+  });
+  refreshIndexChooser();
+  renderPnl();
+  resetWorkloadPolling();
+  window.setGoldLiquidityWorkload?.(!!tradeXWorkloads.sections.gold_liquidity);
+  window.setTechnicalWorkload?.(!!tradeXWorkloads.sections.technical);
+}
+
+async function loadWorkloads() {
+  try {
+    const value = await api('/api/workloads');
+    applyWorkloads(value);
+    document.querySelectorAll('[data-workload-section], [data-workload-instrument]').forEach(input => {
+      input.addEventListener('change', saveWorkloadsFromControls);
+    });
+  } catch (error) {
+    console.warn('Workload controls unavailable:', error);
+  }
+}
+
+async function saveWorkloadsFromControls() {
+  if (workloadSaveBusy) return;
+  const next = {
+    sections: Object.fromEntries([...document.querySelectorAll('[data-workload-section]')]
+      .map(input => [input.dataset.workloadSection, input.checked])),
+    instruments: Object.fromEntries([...document.querySelectorAll('[data-workload-instrument]')]
+      .map(input => [input.dataset.workloadInstrument, input.checked]))
+  };
+  workloadSaveBusy = true;
+  const status = document.getElementById('workloadSaveStatus');
+  if (status) status.textContent = 'Saving…';
+  try {
+    const saved = await api('/api/workloads', next);
+    applyWorkloads(saved);
+    if (status) status.textContent = 'Saved';
+    showToast('Workload selection saved.', 'success');
+    await poll();
+  } catch (error) {
+    applyWorkloads(tradeXWorkloads);
+    if (status) status.textContent = 'Save failed';
+    showToast(`Could not save workload selection: ${error.message}`, 'error');
+  } finally {
+    workloadSaveBusy = false;
+    setTimeout(() => { if (status) status.textContent = ''; }, 2200);
+  }
+}
+
+function isInstrumentActive(name) {
+  return !!tradeXWorkloads.instruments[String(name || '').toUpperCase()];
 }
 
 function updateClock() {
@@ -142,7 +217,7 @@ function refreshIndexChooser() {
     ['commodity', 'Commodity']
   ];
   container.innerHTML = groups.map(([category, label]) => {
-    const members = (cfg.indices || []).filter(idx => (idx.category || 'equity') === category);
+    const members = (cfg.indices || []).filter(idx => (idx.category || 'equity') === category && isInstrumentActive(idx.name));
     if (!members.length) return '';
     return `<div class="market-index-group"><span class="market-index-label">${label}</span><div class="market-index-options">${members.map(idx => {
       const lot = latestState?.market_lot_sizes?.[idx.name] || idx.lot_size || (idx.name.toUpperCase() === 'SENSEX' ? 20 : 65);
@@ -156,7 +231,9 @@ function refreshIndexChooser() {
   const rulesEl = document.getElementById('indexRuleBadge');
   if (rulesEl) {
     const selectedConfig = (cfg.indices || []).find(item => item.name === current);
-    if (selectedConfig?.category === 'commodity') {
+    if (!current) {
+      rulesEl.textContent = 'Enable a market instrument in Data Workloads';
+    } else if (selectedConfig?.category === 'commodity') {
       rulesEl.textContent = `${selectedConfig.display_name || current}: strike spacing from live chain · Premium multiplier: ${latestState?.market_lot_sizes?.[current] || selectedConfig.lot_size || '—'}×`;
     } else if (current.toUpperCase() === 'SENSEX') {
       rulesEl.textContent = 'SENSEX: 100-pt Center Rule · Distances 100, 200, 300 · Lot: 20';
@@ -171,7 +248,9 @@ function refreshIndexChooser() {
 
 function getSelectedPairIndex() {
   const select = document.getElementById('pairIndex');
-  return select?.value || localStorage.getItem('tradex.selectedIndex') || 'NIFTY';
+  const saved = select?.value || localStorage.getItem('tradex.selectedIndex') || 'NIFTY';
+  if (isInstrumentActive(saved) && (cfg.indices || []).some(item => item.name === saved)) return saved;
+  return (cfg.indices || []).find(item => isInstrumentActive(item.name))?.name || '';
 }
 
 function selectPairIndex(name) {
@@ -287,6 +366,16 @@ function renderPairs() {
   const rows = latestState?.rows || [];
   const tbody = document.getElementById('pairRows');
   const infoEl = document.getElementById('centerInfo');
+  if (!tradeXWorkloads.sections.terminal) {
+    if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="workload-disabled-cell">Terminal &amp; Pairs is paused. Turn it on in Data Workloads to resume market data.</td></tr>';
+    if (infoEl) infoEl.textContent = 'Terminal & Pairs workload is off.';
+    return;
+  }
+  if (!name) {
+    if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="workload-disabled-cell">Turn on at least one market in Data Workloads.</td></tr>';
+    if (infoEl) infoEl.textContent = 'No market instruments are enabled.';
+    return;
+  }
 
   // Backend Lot Size logic (No UI input needed)
   const isSensex = name.toUpperCase() === 'SENSEX';
@@ -1021,8 +1110,16 @@ function filterOptionChain() {
 function renderOptionsChain() {
   const tbody = document.getElementById('chainRows');
   if (!tbody) return;
+  if (!tradeXWorkloads.sections.terminal) {
+    tbody.innerHTML = '<tr><td colspan="3" class="workload-disabled-cell">Terminal &amp; Pairs is paused in Data Workloads.</td></tr>';
+    return;
+  }
 
   const name = getSelectedPairIndex();
+  if (!name) {
+    tbody.innerHTML = '<tr><td colspan="3" class="workload-disabled-cell">Turn on a market in Data Workloads to load its option chain.</td></tr>';
+    return;
+  }
   const rows = latestState?.rows || [];
   const quote = Number(latestState?.underlying_prices?.[name] || 0);
   const details = latestState?.underlying_details?.[name] || {};
@@ -1817,6 +1914,18 @@ function renderPnl(force = true) {
   if (!force && Date.now() < pnlChainScrollPauseUntil) return;
   pnlLastMarketSignature = pnlMarketSignature();
 
+  if (!tradeXWorkloads.sections.pnl) {
+    host.innerHTML = `<div class="card workload-disabled-card"><strong>Position PnL is paused</strong><span>${pnlPositions.length} saved position${pnlPositions.length === 1 ? '' : 's'} remain stored on this device. Turn on Position PnL in Data Workloads to resume live valuations.</span></div>`;
+    updatePnlSummary(0, 0, 0, 0);
+    return;
+  }
+  const visiblePositions = pnlPositions.filter(position => isInstrumentActive(position.index));
+  if (pnlPositions.length && !visiblePositions.length) {
+    host.innerHTML = `<div class="card workload-disabled-card"><strong>No enabled-market positions</strong><span>Your ${pnlPositions.length} saved position${pnlPositions.length === 1 ? '' : 's'} remain stored. Turn on their instrument in Data Workloads to show them again.</span></div>`;
+    updatePnlSummary(0, 0, 0, 0);
+    return;
+  }
+
   // PnL is refreshed during every state poll. Preserve each chain's scroll
   // position while replacing its markup so polling does not jump the user.
   const priorChainScroll = new Map(
@@ -1824,7 +1933,7 @@ function renderPnl(force = true) {
       .map(el => [el.id, el.scrollTop])
   );
 
-  if (!pnlPositions.length) {
+  if (!visiblePositions.length) {
     host.innerHTML = `
       <div class="card" style="grid-column: 1/-1; text-align: center; padding: 48px 24px; color: var(--text-muted);">
         <div style="font-size: 32px; margin-bottom: 12px;">💼</div>
@@ -1842,7 +1951,7 @@ function renderPnl(force = true) {
   let targetsHitCount = 0;
   let changed = false;
 
-  const html = pnlPositions.map(p => {
+  const html = visiblePositions.map(p => {
     // If this position is a Multi-Leg Strategy Pack, render Complete Setup Panel!
     if (p.isPack || (p.legs && p.legs.length > 0) || Number(p.callStrike) > 0 || Number(p.putStrike) > 0) {
       const packRes = renderStrategyPackPanel(legacyPositionAsPack(p));
@@ -2135,7 +2244,7 @@ function openPnlModal() {
   document.getElementById('pnlFormError').textContent = '';
   const select = document.getElementById('pnlIndex');
   select.innerHTML = [['equity', 'Equity'], ['commodity', 'Commodity']].map(([category, label]) => {
-    const entries = (cfg.indices || []).filter(item => (item.category || 'equity') === category);
+    const entries = (cfg.indices || []).filter(item => (item.category || 'equity') === category && isInstrumentActive(item.name));
     return entries.length ? `<optgroup label="${label}">${entries.map(item => `<option value="${esc(item.name)}">${esc(item.display_name || item.name)}</option>`).join('')}</optgroup>` : '';
   }).join('');
   populatePnlExpiries();
@@ -2563,18 +2672,12 @@ function renderLogs() {
 let lastSnapshotSaveTime = 0;
 
 async function getFrontendState() {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 1200);
   try {
-    const response = await fetch('http://127.0.0.1:8767/api/state', { signal: controller.signal });
-    if (!response.ok) throw new Error('Scraper app is unavailable');
     scraperAppConnected = true;
-    return await response.json();
-  } catch (_) {
-    scraperAppConnected = false;
     return await api('/api/state');
-  } finally {
-    clearTimeout(timeout);
+  } catch (error) {
+    scraperAppConnected = false;
+    throw error;
   }
 }
 
@@ -2597,9 +2700,15 @@ async function poll() {
         }));
       }
     } else {
-      // If live rows are empty, check localStorage backup
-      const backup = localStorage.getItem('tradex.lastSnapshotData');
-      if (backup) {
+      // Keep the last in-memory view while scraping is paused. Read the saved
+      // browser snapshot only once, instead of parsing it on every idle poll.
+      if (!s.enabled && latestState?.rows?.length) {
+        s.rows = latestState.rows;
+        s.underlying_prices = s.underlying_prices || latestState.underlying_prices || {};
+        s.last_update = s.last_update || latestState.last_update;
+      } else if (!latestState?.rows?.length) {
+        const backup = localStorage.getItem('tradex.lastSnapshotData');
+        if (backup) {
         try {
           const parsed = JSON.parse(backup);
           if (parsed.rows?.length) {
@@ -2611,14 +2720,18 @@ async function poll() {
             if (!s.last_update) s.last_update = parsed.last_update;
           }
         } catch (_) {}
+        }
       }
     }
 
     latestState = s;
     window.latestState = s;
+    if (s.workloads && JSON.stringify(s.workloads) !== JSON.stringify(tradeXWorkloads)) applyWorkloads(s.workloads);
 
     // Update Scraping Button & Indicator
+    const scraperStateChanged = scrapingOn !== !!s.enabled;
     scrapingOn = !!s.enabled;
+    if (scraperStateChanged) resetWorkloadPolling();
     const scrapeBtn = document.getElementById('scrapeBtn');
     if (scrapeBtn) {
       scrapeBtn.textContent = scraperAppConnected
@@ -2658,7 +2771,7 @@ async function poll() {
 
     renderPairs();
     renderOptionsChain();
-    renderPnlFromPoll();
+    if (tradeXWorkloads.sections.pnl) renderPnlFromPoll();
     renderSheetsProgress(s);
     renderLogs();
 

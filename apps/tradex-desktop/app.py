@@ -116,6 +116,43 @@ def load_config() -> dict[str, Any]:
 
 config = load_config()
 
+DEFAULT_WORKLOADS = {
+    "sections": {"terminal": False, "pnl": False, "technical": False, "gold_liquidity": False},
+    "instruments": {"NIFTY": False, "SENSEX": False, "GOLDM": False, "SILVERM": False},
+}
+WORKLOADS_PATH = DATA_DIR / "workloads.json"
+
+
+def load_workloads() -> dict[str, dict[str, bool]]:
+    try:
+        saved = json.loads(WORKLOADS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        saved = {}
+    return {
+        group: {key: bool(saved.get(group, {}).get(key, value))
+                for key, value in defaults.items()}
+        for group, defaults in DEFAULT_WORKLOADS.items()
+    }
+
+
+workloads = load_workloads()
+
+
+def section_enabled(section: str) -> bool:
+    with lock:
+        return bool(workloads["sections"].get(section, False))
+
+
+def instrument_enabled(name: str) -> bool:
+    with lock:
+        return bool(workloads["instruments"].get(str(name).strip().upper(), False))
+
+
+def active_market_indices() -> list[dict[str, Any]]:
+    if not (section_enabled("terminal") or section_enabled("pnl")):
+        return []
+    return [item for item in config.get("indices", []) if instrument_enabled(item.get("name", ""))]
+
 
 @app.before_request
 def record_dashboard_activity() -> None:
@@ -130,6 +167,23 @@ def save_config(data: dict[str, Any]) -> None:
         config = data
         CONFIG_PATH.write_text(json.dumps(config, indent=2))
     refresh_event.set()
+
+
+def save_workloads(data: dict[str, Any]) -> dict[str, dict[str, bool]]:
+    global workloads
+    incoming = data if isinstance(data, dict) else {}
+    updated = {
+        group: {key: bool(incoming.get(group, {}).get(key, current))
+                for key, current in defaults.items()}
+        for group, defaults in DEFAULT_WORKLOADS.items()
+    }
+    with lock:
+        workloads = updated
+        WORKLOADS_PATH.write_text(json.dumps(workloads, indent=2), encoding="utf-8")
+    refresh_event.set()
+    if scraping_enabled:
+        force_scan_event.set()
+    return updated
 
 
 def valid_url(value: str) -> bool:
@@ -578,7 +632,12 @@ def poll_once() -> None:
     source_row_count = 0
     snapshot_time = datetime.now().astimezone().strftime("%Y-%m-%d %I:%M %p")
     log_event("Live scan started")
-    indices = config.get("indices", [])
+    indices = active_market_indices()
+    if not indices:
+        with lock:
+            state.update(rows=[], option_chain_rows=[], underlying_prices={}, underlying_details={},
+                         scanning=False, running=False, scan_stage="No market data services are enabled")
+        return
 
     def fetch_one_index(idx: dict[str, Any]):
         try:
@@ -898,6 +957,13 @@ def poll_loop() -> None:
                     refresh_event.wait(0.5)
                     refresh_event.clear()
                     continue
+                if not active_market_indices():
+                    with lock:
+                        state.update(rows=[], option_chain_rows=[], underlying_prices={}, underlying_details={},
+                                     scanning=False, running=False, scan_stage="No market data services are enabled")
+                    refresh_event.wait(1.0)
+                    refresh_event.clear()
+                    continue
                 local_now = datetime.now(MARKET_TIMEZONE)
                 inside_market_window = MARKET_START <= local_now.time().replace(tzinfo=None) <= MARKET_END
                 if market_window_active is None or market_window_active != inside_market_window:
@@ -924,7 +990,8 @@ def poll_loop() -> None:
                         session_day -= timedelta(days=1)
                         while session_day.weekday() >= 5:
                             session_day -= timedelta(days=1)
-                    run_offhours_chart_history(session_day.isoformat())
+                    if section_enabled("pnl") and instrument_enabled("SENSEX"):
+                        run_offhours_chart_history(session_day.isoformat())
                     refresh_event.wait(30)
                     refresh_event.clear()
                     continue
@@ -1089,6 +1156,8 @@ def serve_static(filename: str):
 
 @app.get("/api/ta/market")
 def technical_market_api():
+    if not section_enabled("technical"):
+        return jsonify(error="Turn on the Technical Analysis workload to fetch analysis."), 409
     try:
         symbol = str(request.args.get("symbol", "XAUUSDT")).upper()
         timeframe = str(request.args.get("timeframe", "15m")).lower()
@@ -1111,6 +1180,8 @@ def technical_market_api():
 
 @app.get("/api/ta/price")
 def technical_live_price_api():
+    if not section_enabled("technical"):
+        return jsonify(error="Turn on the Technical Analysis workload to fetch live prices."), 409
     try:
         symbol = str(request.args.get("symbol", "XAUUSDT")).upper()
         response = jsonify(get_technical_live_price(symbol))
@@ -1122,6 +1193,8 @@ def technical_live_price_api():
 
 @app.get("/api/gold-liquidity/candles")
 def gold_liquidity_candles_api():
+    if not section_enabled("gold_liquidity"):
+        return jsonify(error="Turn on the Gold Liquidity workload to fetch candles."), 409
     try:
         return jsonify(fetch_gold_liquidity_candles(
             str(request.args.get("exchange", "bybit")),
@@ -1137,6 +1210,8 @@ def gold_liquidity_candles_api():
 
 @app.get("/api/gold-liquidity/fx")
 def gold_liquidity_fx_api():
+    if not section_enabled("gold_liquidity"):
+        return jsonify(error="Turn on the Gold Liquidity workload to fetch exchange rates."), 409
     try:
         return jsonify(fetch_usd_inr())
     except Exception as exc:
@@ -1145,6 +1220,8 @@ def gold_liquidity_fx_api():
 
 @app.get("/api/gold-liquidity/ticker")
 def gold_liquidity_ticker_api():
+    if not section_enabled("gold_liquidity"):
+        return jsonify(error="Turn on the Gold Liquidity workload to fetch live prices."), 409
     try:
         return jsonify(fetch_gold_liquidity_ticker(str(request.args.get("exchange", "bybit"))))
     except ValueError as exc:
@@ -1155,6 +1232,8 @@ def gold_liquidity_ticker_api():
 
 @app.get("/api/gold-liquidity/live")
 def gold_liquidity_live_api():
+    if not section_enabled("gold_liquidity"):
+        return jsonify(error="Turn on the Gold Liquidity workload to refresh live data."), 409
     try:
         return jsonify(fetch_gold_liquidity_live(
             str(request.args.get("exchange", "bybit")),
@@ -1177,6 +1256,8 @@ def _technical_timeframes_ready(symbol: str) -> list[str]:
 
 @app.post("/api/chart/analyze")
 def chart_analyze_api():
+    if not section_enabled("technical"):
+        return jsonify(error="Turn on the Technical Analysis workload to analyze charts."), 409
     data = request.get_json(force=True)
     try:
         urls = data.get("urls") or [data.get("url", "")]
@@ -1251,6 +1332,18 @@ def chart_report():
 def get_config():
     # Do not expose credential contents; only the configured local path is returned.
     return jsonify(config)
+
+
+@app.get("/api/workloads")
+def get_workloads():
+    with lock:
+        return jsonify(workloads)
+
+
+@app.post("/api/workloads")
+def update_workloads():
+    data = request.get_json(force=True)
+    return jsonify(ok=True, **save_workloads(data))
 
 
 @app.post("/api/config")
@@ -1349,6 +1442,19 @@ def load_last_snapshot() -> Optional[dict[str, Any]]:
 @app.get("/api/state")
 def get_state():
     result = {**state}
+    enabled_names = {str(item.get("name", "")).strip().upper() for item in active_market_indices()}
+    if enabled_names:
+        result["rows"] = [row for row in result.get("rows", [])
+                          if str(row.get("index", "")).strip().upper() in enabled_names]
+        result["underlying_prices"] = {key: value for key, value in result.get("underlying_prices", {}).items()
+                                       if str(key).strip().upper() in enabled_names}
+        result["underlying_details"] = {key: value for key, value in result.get("underlying_details", {}).items()
+                                        if str(key).strip().upper() in enabled_names}
+    else:
+        result["rows"] = []
+        result["underlying_prices"] = {}
+        result["underlying_details"] = {}
+    result["workloads"] = workloads
     # Full chains are fetched on demand by each Portfolio PnL card. Keep the
     # fast dashboard polling payload compact.
     result.pop("option_chain_rows", None)
@@ -1360,7 +1466,7 @@ def get_state():
     with lock:
         result["enabled"] = scraping_enabled
         # If live rows or spot quotes are not yet available, fallback to the last available snapshot
-        if not result.get("rows") or len(result.get("rows", [])) < 5:
+        if scraping_enabled and (not result.get("rows") or len(result.get("rows", [])) < 5):
             cached = load_last_snapshot()
             if cached:
                 result["rows"] = cached.get("rows", [])
@@ -1372,9 +1478,29 @@ def get_state():
                 result["underlying_details"] = {**cached_details, **(result.get("underlying_details") or {})}
                 if not result.get("last_update"):
                     result["last_update"] = cached.get("last_update")
-            elif not state.get("scanning"):
+            elif scraping_enabled and active_market_indices() and not state.get("scanning"):
                 # If no cache and no rows, trigger poll
                 threading.Thread(target=poll_once, daemon=True).start()
+    # Apply filters after the cached-snapshot fallback too; disabled markets
+    # must never be reintroduced by a previous all-markets snapshot.
+    enabled_names = {str(item.get("name", "")).strip().upper() for item in active_market_indices()}
+    result["rows"] = [row for row in result.get("rows", [])
+                      if str(row.get("index", "")).strip().upper() in enabled_names]
+    result["underlying_prices"] = {key: value for key, value in result.get("underlying_prices", {}).items()
+                                   if str(key).strip().upper() in enabled_names}
+    result["underlying_details"] = {key: value for key, value in result.get("underlying_details", {}).items()
+                                    if str(key).strip().upper() in enabled_names}
+    if not result.get("enabled"):
+        result["rows"] = []
+        result["underlying_prices"] = {}
+        result["underlying_details"] = {}
+    if section_enabled("pnl"):
+        result["last_option_prices"] = {
+            key: value for key, value in result.get("last_option_prices", {}).items()
+            if str(value.get("index", "")).strip().upper() in enabled_names
+        }
+    else:
+        result["last_option_prices"] = {}
     response = jsonify(result)
     # The standalone dashboard reads the packaged scraper's state across its
     # localhost port. This endpoint is read-only and has no credentialed access.
@@ -1388,6 +1514,10 @@ def get_full_option_chain():
     expiry = str(request.args.get("expiry", "")).strip()
     if not index:
         return jsonify(error="An index name is required."), 400
+    if not section_enabled("pnl"):
+        return jsonify(error="Turn on the Position PnL workload to load option chains."), 409
+    if not instrument_enabled(index):
+        return jsonify(error=f"Turn on {index} in Markets to load its option chain."), 409
     with lock:
         rows = state.get("option_chain_rows") or []
         timestamp = state.get("last_update")

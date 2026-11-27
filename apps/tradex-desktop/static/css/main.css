@@ -1524,3 +1524,20 @@ td.spot-divider-td {
 .gl-date-groups { display:grid; gap:6px; margin-top:10px; }.gl-date-card { border:1px solid rgba(148,163,184,.13); border-radius:7px; background:#0b0f17; }.gl-date-card > summary { cursor:pointer; padding:10px 12px; color:#e2e8f0; font:700 10px var(--font-mono); }.gl-date-card[open] > summary { color:#fbbf24; border-bottom:1px solid rgba(148,163,184,.12); }.gl-session-filters { display:flex; gap:5px; flex-wrap:wrap; margin:12px 0 4px; }.gl-session-filters button { padding:6px 9px; border:1px solid rgba(148,163,184,.15); border-radius:99px; color:#cbd5e1; background:#0b0f17; cursor:pointer; font-size:9px; }.gl-session-filters button.active { color:#111827; background:#f59e0b; border-color:#f59e0b; font-weight:800; }
 @media(max-width:850px){.gl-live-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.gl-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.gl-grid-2{grid-template-columns:1fr}}
 @media(max-width:560px){.gl-kpis{grid-template-columns:1fr}.gl-session-bar,.gl-tf-row{grid-template-columns:75px 1fr 75px}.gl-session-bar small,.gl-tf-row small{display:none}.gl-key-times{grid-template-columns:1fr}.gl-live-strip{grid-template-columns:1fr 1fr}.gl-clock-layout{grid-template-columns:1fr}.gl-radial-clock{width:140px;margin:auto}.gl-heatmap-layout{grid-template-columns:48px minmax(0,1fr) 42px;gap:3px}.gl-hour-rail > strong{font-size:7px}.gl-clock-vol-bars{gap:1px}.gl-clock-vol-col{font-size:7px}}
+
+/* User-selectable workload gates */
+.workload-controls { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:10px 22px 0; padding:9px 12px; border:1px solid var(--border-card); border-radius:10px; background:rgba(15,23,42,.78); }
+.workload-group { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+.workload-group > strong { margin-right:3px; color:var(--text-dim); font-size:9px; letter-spacing:.08em; text-transform:uppercase; }
+.workload-group label { display:inline-flex; align-items:center; gap:5px; padding:5px 8px; border:1px solid var(--border-card); border-radius:999px; background:var(--bg-input); color:var(--text-main); font-size:9px; cursor:pointer; user-select:none; }
+.workload-group label:has(input:checked) { border-color:rgba(16,185,129,.55); color:#a7f3d0; background:rgba(16,185,129,.1); }
+.workload-group input { accent-color:#10b981; width:12px; height:12px; margin:0; }
+.workload-save-status { min-width:36px; color:var(--text-dim); font-size:8px; }
+.workload-disabled-card { grid-column:1/-1; display:grid; gap:6px; padding:24px; color:var(--text-muted); }
+.workload-disabled-card strong { color:var(--text-main); font-size:14px; }
+.workload-disabled-cell { text-align:center; padding:24px !important; color:var(--text-muted); }
+.gl-timeframe-control { display:grid; gap:5px; color:var(--text-muted); font-size:10px; }
+.gl-timeframe-buttons { display:flex; gap:3px; flex-wrap:wrap; }
+.gl-timeframe-buttons button { padding:6px 8px; border:1px solid rgba(148,163,184,.18); border-radius:6px; color:#cbd5e1; background:#0b0f17; font:700 9px var(--font-mono); cursor:pointer; }
+.gl-timeframe-buttons button.active { color:#111827; background:#f59e0b; border-color:#f59e0b; }
+@media(max-width:850px){.workload-controls{margin-left:12px;margin-right:12px}.workload-group{width:100%}}
