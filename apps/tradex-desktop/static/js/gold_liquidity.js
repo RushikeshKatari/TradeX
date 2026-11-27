@@ -258,8 +258,13 @@
     try {
       const query=new URLSearchParams({exchange:ex,timeframe:state.timeframe,start,end});const response=await fetch(`/api/gold-liquidity/candles?${query}`);const data=await response.json();if(!response.ok)throw new Error(data.error||'Historical candles unavailable');
       state.source=data.candles||[];state.info=data;state.candles=decorate(state.source);state.ticker=null;
-      const gaps=detectGaps(state.source,state.timeframe);const startGap=state.source[0].time,endGap=state.source.at(-1).time;
-      setStatus(`${data.count.toLocaleString()} real ${state.timeframe} candles from ${data.source} · ${istDateTime(startGap)} to ${istDateTime(endGap)}.${gaps?` Source gaps: ${gaps.toLocaleString()} missing candles; none were interpolated.`:' No gaps detected at this interval.'}`,gaps?'warning':'success');
+      const gaps=detectGaps(state.source,state.timeframe),startGap=state.source[0].time,endGap=state.source.at(-1).time;
+      const requestedStart=Date.parse(`${start}T00:00:00+05:30`),requestedEnd=Date.parse(`${end}T00:00:00+05:30`)+86400000;
+      const partialStart=startGap-requestedStart>TF_MS[state.timeframe]*1.5;
+      const expectedEnd=Math.min(requestedEnd,Date.now());
+      const partialEnd=expectedEnd-(endGap+TF_MS[state.timeframe])>TF_MS[state.timeframe]*2;
+      const coverage=partialStart||partialEnd?` Requested ${istDateLabel(requestedStart)}–${istDateLabel(requestedEnd-1)}; returned coverage is ${istDateLabel(startGap)}–${istDateLabel(endGap)}${partialStart?' (start of requested history is unavailable)':''}${partialEnd?' (end of requested history is unavailable)':''}.`:'';
+      setStatus(`${data.count.toLocaleString()} real ${state.timeframe} candles from ${data.source} · ${istDateTime(startGap)} to ${istDateTime(endGap)}.${coverage}${gaps?` Source gaps: ${gaps.toLocaleString()} missing candles; none were interpolated.`:' No internal gaps detected at this interval.'}`,gaps||partialStart||partialEnd?'warning':'success');
       renderAll();fetchTicker(ex);
     } catch(e) {state.source=[];state.candles=[];state.info=null;state.ticker=null;renderAll();setStatus(e.message,'error');}
     finally {state.loading=false;$('glGenerate').disabled=false;}
